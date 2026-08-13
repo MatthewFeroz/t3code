@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
+import { ExternalLauncherError, LaunchEditorInput, RevealInFileManagerInput } from "./editor.ts";
 import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
@@ -219,6 +219,7 @@ export const WS_METHODS = {
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
+  shellRevealInFileManager: "shell.revealInFileManager",
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
@@ -671,6 +672,11 @@ export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
   error: Schema.Union([ExternalLauncherError, EnvironmentAuthorizationError]),
 });
 
+export const WsShellRevealInFileManagerRpc = Rpc.make(WS_METHODS.shellRevealInFileManager, {
+  payload: RevealInFileManagerInput,
+  error: Schema.Union([ExternalLauncherError, EnvironmentAuthorizationError]),
+});
+
 export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   payload: FilesystemBrowseInput,
   success: FilesystemBrowseResult,
@@ -1067,6 +1073,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
+  WsShellRevealInFileManagerRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
   WsAttachmentsCreateUploadUrlRpc,

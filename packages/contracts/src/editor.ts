@@ -75,6 +75,11 @@ export const LaunchEditorInput = Schema.Struct({
 });
 export type LaunchEditorInput = typeof LaunchEditorInput.Type;
 
+export const RevealInFileManagerInput = Schema.Struct({
+  path: TrimmedNonEmptyString,
+});
+export type RevealInFileManagerInput = typeof RevealInFileManagerInput.Type;
+
 const remoteSchemeOf = (editor: EditorDefinition): string | undefined => editor.remoteScheme;
 
 /** Editors that can open a remote workspace via `vscode-remote` deep links. */
