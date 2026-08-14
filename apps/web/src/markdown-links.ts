@@ -92,6 +92,19 @@ export function normalizeMarkdownLinkDestination(value: string): string {
   return unwrapMarkdownLinkDestination(value.trim());
 }
 
+export function normalizeMarkdownLinkHrefKey(href: string): string {
+  const normalizedHref = normalizeMarkdownLinkDestination(href);
+  const rewrittenHref = rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
+  const normalizedWindowsPath = WINDOWS_DRIVE_PATH_PATTERN.test(rewrittenHref)
+    ? rewrittenHref.replaceAll("\\", "/")
+    : rewrittenHref;
+  try {
+    return encodeURI(normalizedWindowsPath).replace(/%25(?=[0-9A-Fa-f]{2})/g, "%");
+  } catch {
+    return normalizedWindowsPath;
+  }
+}
+
 function stripSearchAndHash(value: string): { path: string; hash: string } {
   const hashIndex = value.indexOf("#");
   const pathWithSearch = hashIndex >= 0 ? value.slice(0, hashIndex) : value;

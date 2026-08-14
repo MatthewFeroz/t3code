@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 
 import {
   extractMarkdownLinkHrefs,
+  normalizeMarkdownLinkHrefKey,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
@@ -76,6 +77,23 @@ describe("shouldOpenMarkdownFileLinkInBrowserByDefault", () => {
     expect(shouldOpenMarkdownFileLinkInBrowserByDefault("report.PDF?download=1")).toBe(true);
     expect(shouldOpenMarkdownFileLinkInBrowserByDefault("report.html")).toBe(false);
     expect(shouldOpenMarkdownFileLinkInBrowserByDefault("report.xml")).toBe(false);
+  });
+});
+
+describe("markdown link href metadata", () => {
+  it("extracts angle-bracketed destinations containing spaces", () => {
+    expect(extractMarkdownLinkHrefs("[file](<src/my file.ts>)")).toEqual(["src/my file.ts"]);
+  });
+
+  it("matches source destinations containing spaces to rendered file metadata", () => {
+    const [sourceHref = ""] = extractMarkdownLinkHrefs("[file](<src/my file.ts>)");
+    const renderedHref = "src/my%20file.ts";
+    expect(normalizeMarkdownLinkHrefKey(sourceHref)).toBe(
+      normalizeMarkdownLinkHrefKey(renderedHref),
+    );
+    expect(
+      resolveMarkdownFileLinkMeta(normalizeMarkdownLinkHrefKey(sourceHref), "/repo/project"),
+    ).toMatchObject({ filePath: "/repo/project/src/my file.ts" });
   });
 });
 
