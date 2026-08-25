@@ -76,7 +76,7 @@ export const LaunchEditorInput = Schema.Struct({
 export type LaunchEditorInput = typeof LaunchEditorInput.Type;
 
 export const RevealInFileManagerInput = Schema.Struct({
-  path: TrimmedNonEmptyString,
+  path: Schema.String.check(Schema.isNonEmpty()),
 });
 export type RevealInFileManagerInput = typeof RevealInFileManagerInput.Type;
 

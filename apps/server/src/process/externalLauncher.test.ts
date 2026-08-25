@@ -532,7 +532,7 @@ it.effect("uses Windows Explorer from WSL without WSLg", () =>
     assert.equal(spawned.command, "explorer.exe");
     assert.deepEqual(spawned.args, [
       "/select,",
-      `\\\\wsl.localhost\\Ubuntu-22.04${targetPath.replaceAll("/", "\\")}`,
+      `\\\\wsl$\\Ubuntu-22.04${targetPath.replaceAll("/", "\\")}`,
     ]);
     assert.equal(spawned.options.shell, false);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -582,7 +582,7 @@ it.effect("uses Windows Explorer from WSL with WSLg", () =>
     assert.equal(spawned.command, "explorer.exe");
     assert.deepEqual(spawned.args, [
       "/select,",
-      `\\\\wsl.localhost\\Ubuntu-22.04${targetPath.replaceAll("/", "\\")}`,
+      `\\\\wsl$\\Ubuntu-22.04${targetPath.replaceAll("/", "\\")}`,
     ]);
     assert.equal(spawned.options.shell, false);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

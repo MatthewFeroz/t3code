@@ -272,7 +272,7 @@ function normalizeWindowsFileManagerPath(target: string): string {
 function resolveWslFileManagerPath(target: string, env: NodeJS.ProcessEnv): string {
   const distroName = resolveWslDistroName(env);
   if (!distroName) return target;
-  return `\\\\wsl.localhost\\${distroName}${normalizeWindowsFileManagerPath(target)}`;
+  return `\\\\wsl$\\${distroName}${normalizeWindowsFileManagerPath(target)}`;
 }
 
 function fileManagerFolderPath(platform: NodeJS.Platform, target: string, path: Path.Path): string {

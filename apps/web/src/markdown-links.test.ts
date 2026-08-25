@@ -95,6 +95,12 @@ describe("markdown link href metadata", () => {
       resolveMarkdownFileLinkMeta(normalizeMarkdownLinkHrefKey(sourceHref), "/repo/project"),
     ).toMatchObject({ filePath: "/repo/project/src/my file.ts" });
   });
+
+  it("normalizes Windows separators before matching rendered hrefs", () => {
+    expect(normalizeMarkdownLinkHrefKey("C:\\Program Files\\project\\main.ts")).toBe(
+      normalizeMarkdownLinkHrefKey("C:/Program%20Files/project/main.ts"),
+    );
+  });
 });
 
 describe("rewriteMarkdownFileUriHref", () => {
