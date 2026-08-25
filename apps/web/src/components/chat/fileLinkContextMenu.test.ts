@@ -20,6 +20,14 @@ describe("file link environment", () => {
     expect(resolveFileLinkEnvironmentId(undefined, activeEnvironmentId)).toBe(activeEnvironmentId);
   });
 
+  it("routes non-thread content through its owning environment", () => {
+    const activeEnvironmentId = EnvironmentId.make("active-environment");
+    const contentEnvironmentId = EnvironmentId.make("content-environment");
+    expect(resolveFileLinkEnvironmentId(undefined, activeEnvironmentId, contentEnvironmentId)).toBe(
+      contentEnvironmentId,
+    );
+  });
+
   it.each([
     {
       connectionPhase: "reconnecting",

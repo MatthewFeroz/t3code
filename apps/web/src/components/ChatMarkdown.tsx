@@ -14,6 +14,7 @@ import {
   WrapTextIcon,
 } from "lucide-react";
 import type {
+  EnvironmentId,
   ScopedThreadRef,
   ServerProviderSkill,
   ThreadLinkedPullRequest,
@@ -134,6 +135,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
+  environmentId?: EnvironmentId | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
   isStreaming?: boolean;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
@@ -1515,6 +1517,7 @@ function ChatMarkdown({
   text,
   cwd,
   threadRef,
+  environmentId: contentEnvironmentId,
   onTaskListChange,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
@@ -1539,7 +1542,11 @@ function ChatMarkdown({
     reportFailure: false,
   });
   const activeEnvironmentId = useActiveEnvironmentId();
-  const environmentId = resolveFileLinkEnvironmentId(threadRef?.environmentId, activeEnvironmentId);
+  const environmentId = resolveFileLinkEnvironmentId(
+    threadRef?.environmentId,
+    activeEnvironmentId,
+    contentEnvironmentId,
+  );
   const environment = useEnvironment(environmentId);
   const preparedConnection = usePreparedConnection(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));

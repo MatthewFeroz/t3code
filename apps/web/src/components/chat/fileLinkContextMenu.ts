@@ -11,8 +11,9 @@ export type FileLinkContextMenuAction =
 export function resolveFileLinkEnvironmentId(
   threadEnvironmentId: EnvironmentId | undefined,
   activeEnvironmentId: EnvironmentId | null,
+  contentEnvironmentId?: EnvironmentId | undefined,
 ): EnvironmentId | null {
-  return threadEnvironmentId ?? activeEnvironmentId;
+  return threadEnvironmentId ?? contentEnvironmentId ?? activeEnvironmentId;
 }
 
 export function canRevealFileLinkInManager(input: {

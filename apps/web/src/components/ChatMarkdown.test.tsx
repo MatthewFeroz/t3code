@@ -10,6 +10,7 @@ vi.mock("../state/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../state/session")>()),
   usePreparedConnection: () => ({ _tag: "Loading" }),
 }));
+vi.mock("../state/environments", () => ({ useEnvironment: () => null }));
 vi.mock("../state/entities", () => ({
   readThreadShell: () => null,
   useActiveEnvironmentId: () => EnvironmentId.make("env-windows"),
