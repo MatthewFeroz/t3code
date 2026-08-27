@@ -172,8 +172,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         colorScheme: defaults?.colorScheme,
       }),
     closeTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CLOSE_TAB_CHANNEL, { tabId }),
-    registerWebview: (tabId, webContentsId) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_REGISTER_WEBVIEW_CHANNEL, { tabId, webContentsId }),
+    registerWebview: (tabId, webContentsId, initialUrl) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_REGISTER_WEBVIEW_CHANNEL, {
+        tabId,
+        webContentsId,
+        initialUrl,
+      }),
     navigate: (tabId, url) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_NAVIGATE_CHANNEL, { tabId, url }),
     goBack: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_BACK_CHANNEL, { tabId }),

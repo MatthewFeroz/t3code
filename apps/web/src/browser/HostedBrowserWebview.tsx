@@ -2,7 +2,14 @@
 
 import type { PreviewViewportSetting, ScopedThreadRef } from "@t3tools/contracts";
 import { useShallow } from "zustand/react/shallow";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ComponentType,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
@@ -34,6 +41,14 @@ interface ElectronWebview extends HTMLElement {
   getWebContentsId: () => number;
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
+
+type PreviewWebviewProps = Omit<ComponentProps<"webview">, "allowpopups"> & {
+  readonly allowpopups: "true";
+};
+
+// React types this Electron attribute as boolean, but React omits unknown
+// boolean attributes. Electron needs the string attribute before guest attach.
+const PreviewWebview = "webview" as unknown as ComponentType<PreviewWebviewProps>;
 
 declare global {
   interface HTMLElementTagNameMap {
@@ -84,6 +99,7 @@ export function HostedBrowserWebview(props: {
 
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
+  const targetSrc = webviewGeneration === 0 ? initialSrc : recoverySrc;
   const latestUrlRef = useRef(initialUrl);
 
   useEffect(() => {
@@ -92,7 +108,6 @@ export function HostedBrowserWebview(props: {
 
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
-    if (node && !node.hasAttribute("allowpopups")) node.setAttribute("allowpopups", "true");
   }, []);
 
   useEffect(() => {
@@ -113,7 +128,11 @@ export function HostedBrowserWebview(props: {
           if (disposed || webviewRef.current !== webview) return;
           const webContentsId = webview.getWebContentsId();
           if (Number.isInteger(webContentsId) && webContentsId > 0) {
-            await bridge.registerWebview(runtimeTabId, webContentsId);
+            await bridge.registerWebview(
+              runtimeTabId,
+              webContentsId,
+              targetSrc === "about:blank" ? null : targetSrc,
+            );
           }
         } catch {
           // did-attach/dom-ready will retry if the guest was not ready yet.
@@ -144,7 +163,7 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener("dom-ready", register);
       webview.removeEventListener("render-process-gone", recoverGuest);
     };
-  }, [config, initialSrc, runtimeTabId, webviewGeneration]);
+  }, [config, initialSrc, runtimeTabId, targetSrc, webviewGeneration]);
 
   const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
@@ -256,12 +275,13 @@ export function HostedBrowserWebview(props: {
             onChange={commitViewportChange}
           />
         ) : null}
-        <webview
+        <PreviewWebview
           key={webviewGeneration}
           ref={setWebviewRef}
-          src={webviewGeneration === 0 ? initialSrc : recoverySrc}
+          src="about:blank"
           partition={config.partition}
           webpreferences={config.webPreferences}
+          allowpopups="true"
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
           data-preview-server-tab={tabId}

@@ -996,6 +996,7 @@ export interface DesktopPreviewTabDefaults {
 export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   webContentsId: Schema.Int.check(Schema.isGreaterThan(0)),
+  initialUrl: Schema.NullOr(Schema.String),
 });
 
 export const DesktopPreviewNavigateInputSchema = Schema.Struct({
@@ -1155,7 +1156,11 @@ export interface DesktopBridge {
 export interface DesktopPreviewBridge {
   createTab: (tabId: string, defaults?: DesktopPreviewTabDefaults) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
-  registerWebview: (tabId: string, webContentsId: number) => Promise<void>;
+  registerWebview: (
+    tabId: string,
+    webContentsId: number,
+    initialUrl: string | null,
+  ) => Promise<void>;
   navigate: (tabId: string, url: string) => Promise<void>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;

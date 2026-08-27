@@ -60,6 +60,7 @@ describe("isPreviewRefreshShortcut", () => {
 
 const {
   browserWindowConstructor,
+  browserWindowFromWebContents,
   createFromPath,
   fromId,
   getFocusedWebContents,
@@ -70,6 +71,9 @@ const {
   writeImage,
 } = vi.hoisted(() => ({
   browserWindowConstructor: vi.fn(),
+  browserWindowFromWebContents: vi.fn<
+    (webContents: Electron.WebContents) => Electron.BrowserWindow | null
+  >(() => null),
   createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
   fromId: vi.fn((_id?: number) => null),
   getFocusedWebContents: vi.fn(() => null),
@@ -81,7 +85,9 @@ const {
 }));
 
 vi.mock("electron", () => ({
-  BrowserWindow: browserWindowConstructor,
+  BrowserWindow: Object.assign(browserWindowConstructor, {
+    fromWebContents: browserWindowFromWebContents,
+  }),
   clipboard: {
     writeImage,
   },
@@ -200,6 +206,7 @@ const makeSourcePng = (width = 1, height = 1): Buffer => {
 
 const makeFaviconWebContents = (options?: {
   readonly fetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  readonly hostWebContents?: Electron.WebContents | null;
   readonly id?: number;
   readonly rasterize?: (code: string) => Promise<unknown>;
   readonly url?: string;
@@ -226,6 +233,11 @@ const makeFaviconWebContents = (options?: {
   });
   const off = vi.fn();
   const debuggerOff = vi.fn();
+  const session = { fetch };
+  const setWindowOpenHandler =
+    vi.fn<
+      (handler: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse) => void
+    >();
   const webContents = {
     id: options?.id ?? 42,
     isDestroyed: () => destroyed,
@@ -235,6 +247,7 @@ const makeFaviconWebContents = (options?: {
     isLoading: () => loading,
     isDevToolsOpened: () => false,
     getZoomFactor: () => 1,
+    hostWebContents: options?.hostWebContents ?? null,
     setZoomFactor: vi.fn(),
     setAudioMuted: vi.fn(),
     isCurrentlyAudible: () => false,
@@ -247,9 +260,9 @@ const makeFaviconWebContents = (options?: {
     off,
     ipc: { on: vi.fn(), off: vi.fn() },
     send: webviewSend,
-    session: { fetch },
+    session,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-    setWindowOpenHandler: vi.fn(),
+    setWindowOpenHandler,
     executeJavaScriptInIsolatedWorld,
     debugger: {
       isAttached: () => false,
@@ -267,6 +280,8 @@ const makeFaviconWebContents = (options?: {
     loadURL,
     off,
     reload,
+    session,
+    setWindowOpenHandler,
     setDestroyed: (value: boolean) => {
       destroyed = value;
     },
@@ -285,6 +300,14 @@ const settle = function* (until: () => boolean) {
     yield* Effect.promise(() => Promise.resolve());
   }
 };
+
+const windowOpenDetails = (url: string): Electron.HandlerDetails => ({
+  url,
+  frameName: "oauth",
+  features: "width=500,height=600",
+  disposition: "new-window",
+  referrer: { url: "http://localhost:3200/", policy: "strict-origin-when-cross-origin" },
+});
 
 const makeTestPictureInPictureWindow = (loadURL: () => Promise<void> = async () => undefined) => {
   const listeners = new Map<string, () => void>();
@@ -319,6 +342,8 @@ const makeTestPictureInPictureWindow = (loadURL: () => Promise<void> = async () 
 describe("PreviewManager", () => {
   beforeEach(() => {
     browserWindowConstructor.mockReset();
+    browserWindowFromWebContents.mockReset();
+    browserWindowFromWebContents.mockReturnValue(null);
     fromId.mockClear();
     getFocusedWebContents.mockReset();
     getFocusedWebContents.mockReturnValue(null);
@@ -329,6 +354,113 @@ describe("PreviewManager", () => {
     createFromPath.mockClear();
     webviewSend.mockClear();
   });
+
+  effectIt.effect("allows an OAuth popup without navigating the opener", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const hostWebContents = {} as Electron.WebContents;
+        const parent = { isDestroyed: () => false } as Electron.BrowserWindow;
+        const preview = makeFaviconWebContents({ hostWebContents });
+        browserWindowFromWebContents.mockReturnValue(parent);
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_popup");
+        yield* manager.registerWebview("tab_popup", 42);
+
+        const handler = preview.setWindowOpenHandler.mock.calls[0]?.[0];
+        expect(handler).toBeDefined();
+        if (!handler) return;
+
+        const expected = {
+          action: "allow",
+          outlivesOpener: false,
+          overrideBrowserWindowOptions: {
+            parent,
+            autoHideMenuBar: true,
+            webPreferences: {
+              session: preview.session,
+              sandbox: true,
+              contextIsolation: true,
+              nodeIntegration: false,
+              nodeIntegrationInSubFrames: false,
+              webviewTag: false,
+            },
+          },
+        };
+        for (const url of [
+          "https://accounts.google.com/",
+          "http://localhost:3200/auth",
+          "about:blank",
+        ]) {
+          expect(handler(windowOpenDetails(url))).toEqual(expected);
+        }
+        expect(preview.loadURL).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect("denies unsafe and nested preview popups", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents();
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_popup_policy");
+        yield* manager.registerWebview("tab_popup_policy", 42);
+
+        const handler = preview.setWindowOpenHandler.mock.calls[0]?.[0];
+        expect(handler).toBeDefined();
+        if (!handler) return;
+        for (const url of [
+          "",
+          "file:///tmp/secret",
+          "data:text/html,hello",
+          "javascript:document.body.textContent='blocked'",
+          "mailto:test@example.com",
+          "about:blank?unexpected",
+          "http://[::1",
+        ]) {
+          expect(handler(windowOpenDetails(url))).toEqual({ action: "deny" });
+        }
+
+        const setMenuBarVisibility = vi.fn();
+        const setChildWindowOpenHandler =
+          vi.fn<
+            (
+              handler: (details: Electron.HandlerDetails) => Electron.WindowOpenHandlerResponse,
+            ) => void
+          >();
+        const popupWindow = {
+          isDestroyed: () => false,
+          setMenuBarVisibility,
+          webContents: {
+            id: 84,
+            isDestroyed: () => false,
+            setWindowOpenHandler: setChildWindowOpenHandler,
+          },
+        } as never;
+        const didCreateWindow = preview.listeners.get("did-create-window") as unknown as (
+          popupWindow: Electron.BrowserWindow,
+        ) => void;
+        didCreateWindow(popupWindow);
+
+        expect(setMenuBarVisibility).toHaveBeenCalledWith(false);
+        const childHandler = setChildWindowOpenHandler.mock.calls[0]?.[0];
+        expect(childHandler).toBeDefined();
+        expect(childHandler?.(windowOpenDetails("https://example.com"))).toEqual({
+          action: "deny",
+        });
+
+        yield* manager.closeTab("tab_popup_policy");
+        expect(preview.off).toHaveBeenCalledWith("did-create-window", didCreateWindow);
+        const detachedHandler = preview.setWindowOpenHandler.mock.calls.at(-1)?.[0];
+        expect(detachedHandler?.(windowOpenDetails("https://example.com"))).toEqual({
+          action: "deny",
+        });
+        expect(preview.loadURL).not.toHaveBeenCalled();
+      }),
+    ),
+  );
 
   effectIt.effect("reports an unregistered webview as temporarily unavailable", () =>
     withManager((manager) =>
@@ -499,6 +631,26 @@ describe("PreviewManager", () => {
 
         expect(loadURL).toHaveBeenCalledOnce();
         expect(loadURL).toHaveBeenCalledWith("http://localhost:3200/");
+      }),
+    ),
+  );
+
+  effectIt.effect("loads the bootstrap URL after installing the popup policy", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents({ url: "about:blank" });
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_bootstrap");
+        yield* manager.registerWebview("tab_bootstrap", 42, "https://example.com/start");
+        yield* Effect.yieldNow;
+
+        expect(preview.setWindowOpenHandler).toHaveBeenCalledOnce();
+        expect(preview.loadURL).toHaveBeenCalledOnce();
+        expect(preview.loadURL).toHaveBeenCalledWith("https://example.com/start");
+        expect(yield* manager.automationStatus("tab_bootstrap")).toMatchObject({
+          url: "https://example.com/start",
+        });
       }),
     ),
   );

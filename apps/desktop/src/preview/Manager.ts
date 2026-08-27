@@ -203,6 +203,20 @@ const artifactSiteSlug = (rawUrl: string): string => {
   }
 };
 
+const isAllowedPreviewPopupUrl = (rawUrl: string): boolean => {
+  if (rawUrl === "about:blank") return true;
+  try {
+    // Window-open URLs arrive fully resolved. Parsing first prevents the shared
+    // free-form URL normalizer from treating a relative value as a hostname.
+    const url = new URL(rawUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    normalizePreviewUrl(rawUrl);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 interface CdpEvaluationResult {
   readonly result?: {
     readonly value?: unknown;
@@ -1673,9 +1687,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
       runFork(forwardShortcut(event, input));
     };
+    const didCreateWindow = (popupWindow: BrowserWindow): void => {
+      if (popupWindow.isDestroyed() || popupWindow.webContents.isDestroyed()) return;
+      popupWindow.setMenuBarVisibility(false);
+      // Authentication windows stay human-only and cannot create more windows.
+      popupWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    };
     yield* Scope.addFinalizer(
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
+        if (!wc.isDestroyed()) {
+          wc.setWindowOpenHandler(() => ({ action: "deny" }));
+        }
         cancelFaviconCapture();
         wc.off("did-start-navigation", navigationStarted);
         wc.off("did-navigate", syncNavigation);
@@ -1686,6 +1709,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("did-stop-loading", sync);
         wc.off("did-fail-load", failed as never);
         wc.off("audio-state-changed", audioStateChanged);
+        wc.off("did-create-window", didCreateWindow);
         wc.off("before-input-event", beforeInput);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);
         wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
@@ -1704,13 +1728,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("audio-state-changed", audioStateChanged);
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput);
         wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
+        wc.on("did-create-window", didCreateWindow);
         wc.setWindowOpenHandler(({ url }) => {
-          runFork(
-            attemptPromise({ operation: "openPreviewWindow", tabId, webContentsId: wc.id }, () =>
-              wc.loadURL(url),
-            ).pipe(Effect.ignore),
-          );
-          return { action: "deny" };
+          if (!isAllowedPreviewPopupUrl(url)) return { action: "deny" };
+          const hostWebContents = wc.hostWebContents;
+          const parent = hostWebContents ? BrowserWindow.fromWebContents(hostWebContents) : null;
+          return {
+            action: "allow",
+            outlivesOpener: false,
+            overrideBrowserWindowOptions: {
+              ...(parent && !parent.isDestroyed() ? { parent } : {}),
+              autoHideMenuBar: true,
+              webPreferences: {
+                session: wc.session,
+                sandbox: true,
+                contextIsolation: true,
+                nodeIntegration: false,
+                nodeIntegrationInSubFrames: false,
+                webviewTag: false,
+              },
+            },
+          };
         });
         wc.on("before-input-event", beforeInput);
       });
@@ -1876,6 +1914,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     tabId: string,
     webContentsId: number,
     expectedGeneration: number | undefined,
+    initialUrl: string | null,
   ) {
     const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
     if (
@@ -1964,12 +2003,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             tabs,
           ] as const;
         }
-        const pendingUrl = current.navStatus.kind === "Loading" ? current.navStatus.url : null;
+        const currentUrl = current.navStatus.kind === "Idle" ? null : current.navStatus.url;
+        const pendingUrl = currentUrl ?? initialUrl;
         const { favicon: _favicon, ...currentWithoutFavicon } = current;
         const next: PreviewTabState = {
           ...currentWithoutFavicon,
           webContentsId,
-          navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
+          navStatus:
+            pendingUrl === null
+              ? computeNavStatus(wc)
+              : {
+                  kind: "Loading",
+                  url: pendingUrl,
+                  title: current.navStatus.kind === "Idle" ? "" : current.navStatus.title,
+                },
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward(),
           audible: attachedAudible,
@@ -2031,11 +2078,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const registerWebview = Effect.fn("PreviewManager.registerWebview")(function* (
     tabId: string,
     webContentsId: number,
+    rawInitialUrl: string | null = null,
   ) {
+    const initialUrl =
+      rawInitialUrl === null
+        ? null
+        : yield* attempt({ operation: "registerWebview.normalizeInitialUrl", tabId }, () =>
+            normalizePreviewUrl(rawInitialUrl),
+          );
     const expectedGeneration = tabLifecycleGenerations.get(tabId);
     return yield* withTabLifecycleLock(
       tabId,
-      registerWebviewUnlocked(tabId, webContentsId, expectedGeneration),
+      registerWebviewUnlocked(tabId, webContentsId, expectedGeneration, initialUrl),
     );
   });
 
@@ -4042,6 +4096,7 @@ export class PreviewManager extends Context.Service<
     readonly registerWebview: (
       tabId: string,
       webContentsId: number,
+      initialUrl?: string | null,
     ) => Effect.Effect<void, PreviewManagerError>;
     readonly navigate: (tabId: string, url: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goBack: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
