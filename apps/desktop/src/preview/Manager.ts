@@ -793,6 +793,35 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
   });
 
+  const syncTabNavigationHistory = Effect.fn("PreviewManager.syncTabNavigationHistory")(function* (
+    tabId: string,
+    wc: Electron.WebContents,
+  ) {
+    if (wc.isDestroyed()) return;
+    const canGoBack = wc.navigationHistory.canGoBack();
+    const canGoForward = wc.navigationHistory.canGoForward();
+    const updatedAt = yield* currentIso;
+    const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
+      const current = tabs.get(tabId);
+      if (
+        !current ||
+        current.webContentsId !== wc.id ||
+        webContents.fromId(wc.id) !== wc ||
+        (current.canGoBack === canGoBack && current.canGoForward === canGoForward)
+      ) {
+        return [Option.none<PreviewTabState>(), tabs] as const;
+      }
+      const state: PreviewTabState = { ...current, canGoBack, canGoForward, updatedAt };
+      return [
+        Option.some(state),
+        replaceMap(tabs, (copy) => {
+          copy.set(tabId, state);
+        }),
+      ] as const;
+    });
+    if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
+  });
+
   const requireWebContents = Effect.fn("PreviewManager.requireWebContents")(function* (
     tabId: string,
   ) {
@@ -2078,7 +2107,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       runFork(
         attemptPromise({ operation: "registerWebview.loadPendingUrl", tabId, webContentsId }, () =>
           wc.loadURL(pendingUrl),
-        ).pipe(Effect.ignore),
+        ).pipe(
+          Effect.tap(() =>
+            attempt(
+              {
+                operation: "registerWebview.clearBootstrapNavigationHistory",
+                tabId,
+                webContentsId,
+              },
+              () => wc.navigationHistory.clear(),
+            ),
+          ),
+          Effect.tap(() => syncTabNavigationHistory(tabId, wc)),
+          Effect.ignore,
+        ),
       );
     }
   });

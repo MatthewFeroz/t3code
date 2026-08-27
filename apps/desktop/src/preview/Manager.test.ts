@@ -209,11 +209,13 @@ const makeFaviconWebContents = (options?: {
   readonly hostWebContents?: Electron.WebContents | null;
   readonly id?: number;
   readonly rasterize?: (code: string) => Promise<unknown>;
+  readonly trackNavigationHistory?: boolean;
   readonly url?: string;
 }) => {
   const sourcePng = makeSourcePng();
   const listeners = new Map<string, (...args: never[]) => void>();
   let currentUrl = options?.url ?? "http://localhost:3200/";
+  let canGoBack = false;
   let destroyed = false;
   let loading = false;
   const fetch = vi.fn(
@@ -228,7 +230,17 @@ const makeFaviconWebContents = (options?: {
       options?.rasterize ? options.rasterize(scripts[0]?.code ?? "") : TEST_FAVICON,
   );
   const reload = vi.fn();
+  const navigationHistoryClear = vi.fn(() => {
+    canGoBack = false;
+  });
   const loadURL = vi.fn(async (url: string) => {
+    if (options?.trackNavigationHistory && currentUrl !== url) {
+      canGoBack = true;
+      currentUrl = url;
+      listeners.get("did-navigate")?.();
+      await Promise.resolve();
+      return;
+    }
     currentUrl = url;
   });
   const off = vi.fn();
@@ -261,7 +273,11 @@ const makeFaviconWebContents = (options?: {
     ipc: { on: vi.fn(), off: vi.fn() },
     send: webviewSend,
     session,
-    navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+    navigationHistory: {
+      canGoBack: () => canGoBack,
+      canGoForward: () => false,
+      clear: navigationHistoryClear,
+    },
     setWindowOpenHandler,
     executeJavaScriptInIsolatedWorld,
     debugger: {
@@ -273,11 +289,13 @@ const makeFaviconWebContents = (options?: {
     },
   };
   return {
+    canGoBack: () => canGoBack,
     executeJavaScriptInIsolatedWorld,
     fetch,
     debuggerOff,
     listeners,
     loadURL,
+    navigationHistoryClear,
     off,
     reload,
     session,
@@ -674,6 +692,25 @@ describe("PreviewManager", () => {
 
         expect(preview.loadURL).toHaveBeenCalledOnce();
         expect(preview.loadURL).toHaveBeenCalledWith("https://example.com/start");
+      }),
+    ),
+  );
+
+  effectIt.effect("removes the blank placeholder from bootstrap history", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents({
+          trackNavigationHistory: true,
+          url: "about:blank",
+        });
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_bootstrap_history");
+        yield* manager.registerWebview("tab_bootstrap_history", 42, "https://example.com/start");
+        yield* settle(() => preview.navigationHistoryClear.mock.calls.length > 0);
+
+        expect(preview.navigationHistoryClear).toHaveBeenCalledOnce();
+        expect(preview.canGoBack()).toBe(false);
       }),
     ),
   );
