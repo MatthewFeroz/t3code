@@ -211,11 +211,13 @@ const makeFaviconWebContents = (options?: {
   readonly rasterize?: (code: string) => Promise<unknown>;
   readonly trackNavigationHistory?: boolean;
   readonly url?: string;
+  readonly waitForLoad?: (url: string) => Promise<void>;
 }) => {
   const sourcePng = makeSourcePng();
   const listeners = new Map<string, (...args: never[]) => void>();
   let currentUrl = options?.url ?? "http://localhost:3200/";
-  let canGoBack = false;
+  let navigationEntries = [currentUrl];
+  let activeNavigationIndex = 0;
   let destroyed = false;
   let loading = false;
   const fetch = vi.fn(
@@ -231,13 +233,25 @@ const makeFaviconWebContents = (options?: {
   );
   const reload = vi.fn();
   const navigationHistoryClear = vi.fn(() => {
-    canGoBack = false;
+    navigationEntries = [navigationEntries[activeNavigationIndex] ?? currentUrl];
+    activeNavigationIndex = 0;
+  });
+  const navigationHistoryRemoveEntryAtIndex = vi.fn((index: number) => {
+    if (index < 0 || index >= navigationEntries.length || index === activeNavigationIndex) {
+      return false;
+    }
+    navigationEntries.splice(index, 1);
+    if (index < activeNavigationIndex) activeNavigationIndex -= 1;
+    return true;
   });
   const loadURL = vi.fn(async (url: string) => {
     if (options?.trackNavigationHistory && currentUrl !== url) {
-      canGoBack = true;
+      navigationEntries.splice(activeNavigationIndex + 1);
+      navigationEntries.push(url);
+      activeNavigationIndex = navigationEntries.length - 1;
       currentUrl = url;
       listeners.get("did-navigate")?.();
+      await options.waitForLoad?.(url);
       await Promise.resolve();
       return;
     }
@@ -274,9 +288,10 @@ const makeFaviconWebContents = (options?: {
     send: webviewSend,
     session,
     navigationHistory: {
-      canGoBack: () => canGoBack,
-      canGoForward: () => false,
+      canGoBack: () => activeNavigationIndex > 0,
+      canGoForward: () => activeNavigationIndex < navigationEntries.length - 1,
       clear: navigationHistoryClear,
+      removeEntryAtIndex: navigationHistoryRemoveEntryAtIndex,
     },
     setWindowOpenHandler,
     executeJavaScriptInIsolatedWorld,
@@ -289,13 +304,14 @@ const makeFaviconWebContents = (options?: {
     },
   };
   return {
-    canGoBack: () => canGoBack,
+    canGoBack: () => activeNavigationIndex > 0,
     executeJavaScriptInIsolatedWorld,
     fetch,
     debuggerOff,
     listeners,
     loadURL,
     navigationHistoryClear,
+    navigationHistoryRemoveEntryAtIndex,
     off,
     reload,
     session,
@@ -707,10 +723,92 @@ describe("PreviewManager", () => {
 
         yield* manager.createTab("tab_bootstrap_history");
         yield* manager.registerWebview("tab_bootstrap_history", 42, "https://example.com/start");
-        yield* settle(() => preview.navigationHistoryClear.mock.calls.length > 0);
+        yield* settle(() => preview.navigationHistoryRemoveEntryAtIndex.mock.calls.length > 0);
 
-        expect(preview.navigationHistoryClear).toHaveBeenCalledOnce();
+        expect(preview.navigationHistoryRemoveEntryAtIndex).toHaveBeenCalledOnce();
+        expect(preview.navigationHistoryRemoveEntryAtIndex).toHaveBeenCalledWith(0);
+        expect(preview.navigationHistoryClear).not.toHaveBeenCalled();
         expect(preview.canGoBack()).toBe(false);
+      }),
+    ),
+  );
+
+  effectIt.effect("does not clear history from a newer navigation", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishBootstrapLoad: (() => void) | undefined;
+        const bootstrapLoad = new Promise<void>((resolve) => {
+          finishBootstrapLoad = resolve;
+        });
+        const preview = makeFaviconWebContents({
+          trackNavigationHistory: true,
+          url: "about:blank",
+          waitForLoad: (url) =>
+            url === "https://example.com/start" ? bootstrapLoad : Promise.resolve(),
+        });
+        fromId.mockReturnValue(preview.webContents);
+
+        yield* manager.createTab("tab_bootstrap_navigation_race");
+        yield* manager.registerWebview(
+          "tab_bootstrap_navigation_race",
+          42,
+          "https://example.com/start",
+        );
+        yield* settle(() => preview.loadURL.mock.calls.length === 1);
+
+        finishBootstrapLoad?.();
+        yield* manager.navigate("tab_bootstrap_navigation_race", "https://example.com/next");
+
+        expect(preview.loadURL).toHaveBeenLastCalledWith("https://example.com/next");
+        expect(preview.navigationHistoryClear).not.toHaveBeenCalled();
+        expect(preview.navigationHistoryRemoveEntryAtIndex).toHaveBeenCalledWith(0);
+        expect(preview.canGoBack()).toBe(true);
+      }),
+    ),
+  );
+
+  effectIt.effect("does not edit bootstrap history after the guest is replaced", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let finishFirstBootstrapLoad: (() => void) | undefined;
+        const firstBootstrapLoad = new Promise<void>((resolve) => {
+          finishFirstBootstrapLoad = resolve;
+        });
+        const first = makeFaviconWebContents({
+          id: 42,
+          trackNavigationHistory: true,
+          url: "about:blank",
+          waitForLoad: () => firstBootstrapLoad,
+        });
+        const replacement = makeFaviconWebContents({
+          id: 43,
+          trackNavigationHistory: true,
+          url: "about:blank",
+        });
+        fromId.mockImplementation((id?: number) => {
+          if (id === 42) return first.webContents;
+          if (id === 43) return replacement.webContents;
+          return null;
+        });
+
+        yield* manager.createTab("tab_bootstrap_replacement");
+        yield* manager.registerWebview(
+          "tab_bootstrap_replacement",
+          42,
+          "https://example.com/start",
+        );
+        yield* settle(() => first.loadURL.mock.calls.length === 1);
+        yield* manager.registerWebview("tab_bootstrap_replacement", 43);
+        yield* settle(
+          () => replacement.navigationHistoryRemoveEntryAtIndex.mock.calls.length === 1,
+        );
+
+        finishFirstBootstrapLoad?.();
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+
+        expect(first.navigationHistoryRemoveEntryAtIndex).not.toHaveBeenCalled();
+        expect(replacement.navigationHistoryRemoveEntryAtIndex).toHaveBeenCalledWith(0);
       }),
     ),
   );

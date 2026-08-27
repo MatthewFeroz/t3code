@@ -793,34 +793,42 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
   });
 
-  const syncTabNavigationHistory = Effect.fn("PreviewManager.syncTabNavigationHistory")(function* (
-    tabId: string,
-    wc: Electron.WebContents,
-  ) {
-    if (wc.isDestroyed()) return;
-    const canGoBack = wc.navigationHistory.canGoBack();
-    const canGoForward = wc.navigationHistory.canGoForward();
-    const updatedAt = yield* currentIso;
-    const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
-      const current = tabs.get(tabId);
-      if (
-        !current ||
-        current.webContentsId !== wc.id ||
-        webContents.fromId(wc.id) !== wc ||
-        (current.canGoBack === canGoBack && current.canGoForward === canGoForward)
-      ) {
-        return [Option.none<PreviewTabState>(), tabs] as const;
-      }
-      const state: PreviewTabState = { ...current, canGoBack, canGoForward, updatedAt };
-      return [
-        Option.some(state),
-        replaceMap(tabs, (copy) => {
-          copy.set(tabId, state);
+  const removeBootstrapNavigationEntry = Effect.fn("PreviewManager.removeBootstrapNavigationEntry")(
+    function* (tabId: string, wc: Electron.WebContents, entryIndex: number) {
+      if (wc.isDestroyed()) return;
+      const updatedAt = yield* currentIso;
+      const next = yield* SynchronizedRef.modifyEffect(tabsRef, (tabs) =>
+        Effect.gen(function* () {
+          const current = tabs.get(tabId);
+          if (!current || current.webContentsId !== wc.id || webContents.fromId(wc.id) !== wc) {
+            return [Option.none<PreviewTabState>(), tabs] as const;
+          }
+          const removed = yield* attempt(
+            {
+              operation: "registerWebview.removeBootstrapNavigationEntry",
+              tabId,
+              webContentsId: wc.id,
+            },
+            () => wc.navigationHistory.removeEntryAtIndex(entryIndex),
+          );
+          if (!removed) return [Option.none<PreviewTabState>(), tabs] as const;
+          const canGoBack = wc.navigationHistory.canGoBack();
+          const canGoForward = wc.navigationHistory.canGoForward();
+          if (current.canGoBack === canGoBack && current.canGoForward === canGoForward) {
+            return [Option.none<PreviewTabState>(), tabs] as const;
+          }
+          const state: PreviewTabState = { ...current, canGoBack, canGoForward, updatedAt };
+          return [
+            Option.some(state),
+            replaceMap(tabs, (copy) => {
+              copy.set(tabId, state);
+            }),
+          ] as const;
         }),
-      ] as const;
-    });
-    if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
-  });
+      );
+      if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
+    },
+  );
 
   const requireWebContents = Effect.fn("PreviewManager.requireWebContents")(function* (
     tabId: string,
@@ -1481,8 +1489,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ) {
       if (wc.isDestroyed()) return;
       const computedNavStatus = computeNavStatus(wc);
-      const canGoBack = wc.navigationHistory.canGoBack();
-      const canGoForward = wc.navigationHistory.canGoForward();
       const updatedAt = yield* currentIso;
       const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
         const current = tabs.get(tabId);
@@ -1512,6 +1518,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           safeHttpOrigin(current.favicon.pageUrl) !==
             safeHttpOrigin(navStatus.kind === "Idle" ? wc.getURL() : navStatus.url);
         const { favicon: _favicon, ...currentWithoutFavicon } = current;
+        const canGoBack = wc.navigationHistory.canGoBack();
+        const canGoForward = wc.navigationHistory.canGoForward();
         const state: PreviewTabState = {
           ...(clearFavicon ? currentWithoutFavicon : current),
           navStatus,
@@ -2104,21 +2112,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       latestNavStatus.url === pendingUrl &&
       wc.getURL() !== pendingUrl
     ) {
+      const bootstrapHistoryEntryIndex =
+        wc.getURL() === "about:blank" &&
+        !wc.navigationHistory.canGoBack() &&
+        !wc.navigationHistory.canGoForward()
+          ? 0
+          : null;
       runFork(
         attemptPromise({ operation: "registerWebview.loadPendingUrl", tabId, webContentsId }, () =>
           wc.loadURL(pendingUrl),
         ).pipe(
           Effect.tap(() =>
-            attempt(
-              {
-                operation: "registerWebview.clearBootstrapNavigationHistory",
-                tabId,
-                webContentsId,
-              },
-              () => wc.navigationHistory.clear(),
-            ),
+            bootstrapHistoryEntryIndex === null
+              ? Effect.void
+              : removeBootstrapNavigationEntry(tabId, wc, bootstrapHistoryEntryIndex),
           ),
-          Effect.tap(() => syncTabNavigationHistory(tabId, wc)),
           Effect.ignore,
         ),
       );
