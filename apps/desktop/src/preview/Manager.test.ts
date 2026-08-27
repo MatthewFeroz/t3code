@@ -655,6 +655,29 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("keeps the bootstrap URL pending through blank guest events", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents({ url: "about:blank" });
+        fromId.mockReturnValue(preview.webContents);
+        webviewSend.mockImplementationOnce(() => {
+          preview.listeners.get("did-stop-loading")?.();
+        });
+
+        yield* manager.createTab("tab_bootstrap_blank_event");
+        yield* manager.registerWebview(
+          "tab_bootstrap_blank_event",
+          42,
+          "https://example.com/start",
+        );
+        yield* settle(() => preview.loadURL.mock.calls.length > 0);
+
+        expect(preview.loadURL).toHaveBeenCalledOnce();
+        expect(preview.loadURL).toHaveBeenCalledWith("https://example.com/start");
+      }),
+    ),
+  );
+
   effectIt.effect("detaches a destroyed webview instead of navigating it", () =>
     withManager((manager) =>
       Effect.gen(function* () {

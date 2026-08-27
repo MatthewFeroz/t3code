@@ -1460,13 +1460,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         if (!current || current.webContentsId !== wc.id || webContents.fromId(wc.id) !== wc) {
           return [Option.none<PreviewTabState>(), tabs] as const;
         }
+        // Placeholder events can land after registration publishes the queued
+        // bootstrap URL but before loadURL starts. Keep that URL pending instead
+        // of letting about:blank erase it.
+        const placeholderLoadPending =
+          current.navStatus.kind === "Loading" &&
+          computedNavStatus.kind === "Idle" &&
+          wc.getURL() === "about:blank";
         // Electron emits did-stop-loading after did-fail-load. At that point the
         // failed guest is no longer "loading", but it has not successfully
         // navigated anywhere. Keep the failure until a new load actually starts.
         const navStatus =
-          preserveLoadFailure &&
-          current.navStatus.kind === "LoadFailed" &&
-          computedNavStatus.kind === "Success"
+          placeholderLoadPending ||
+          (preserveLoadFailure &&
+            current.navStatus.kind === "LoadFailed" &&
+            computedNavStatus.kind === "Success")
             ? current.navStatus
             : computedNavStatus;
         const clearFavicon =
