@@ -46,7 +46,7 @@ function PullRequestRowImpl({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(entry)}
       className={cn(
-        "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         // Offscreen rows are skipped for style, layout and paint: a long list costs what the
         // viewport shows, not what the pages have loaded. The intrinsic size keeps the
         // scrollbar honest while a row is skipped.
@@ -60,19 +60,24 @@ function PullRequestRowImpl({
         mergeability={entry.mergeability}
         baseBranch={entry.baseBranch}
       />
-      <span className="@container/pr-row-meta min-w-0 overflow-hidden">
-        <span className="block truncate text-sm font-medium text-foreground">{entry.title}</span>
-        <PullRequestMetaLine className="mt-0.5 overflow-hidden text-xs text-muted-foreground/70">
+      <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5">
+        <span className="col-start-1 row-start-1 block truncate text-sm font-medium text-foreground">
+          {entry.title}
+        </span>
+        <span className="col-start-2 row-start-1 justify-self-end whitespace-nowrap text-xs text-muted-foreground/70 tabular-nums">
+          {formatRelativeTimeLabel(entry.updatedAt)}
+        </span>
+        <PullRequestMetaLine className="@container/pr-row-meta col-start-1 row-start-2 overflow-hidden text-xs text-muted-foreground/70">
           {matchedElsewhere ? (
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span className="flex shrink-0 items-center gap-1 rounded-full border border-border/60 px-1 text-[10px]" />
+                  <span className="flex min-w-0 items-center gap-1 rounded-full border border-border/60 px-1 text-[10px]" />
                 }
               >
                 <span className="sr-only">matched in the description</span>
                 <SearchIcon aria-hidden className="size-3 shrink-0" />
-                <span aria-hidden className="hidden @xs/pr-row-meta:inline">
+                <span aria-hidden className="hidden truncate @xs/pr-row-meta:block">
                   matched in the description
                 </span>
               </TooltipTrigger>
@@ -135,10 +140,11 @@ function PullRequestRowImpl({
             />
           )}
         </PullRequestMetaLine>
-      </span>
-      <span className="flex shrink-0 flex-col items-end gap-0.5 text-xs text-muted-foreground/70 tabular-nums">
-        <span>{formatRelativeTimeLabel(entry.updatedAt)}</span>
-        <PullRequestDiffStat additions={entry.additions} deletions={entry.deletions} />
+        <PullRequestDiffStat
+          additions={entry.additions}
+          deletions={entry.deletions}
+          className="col-start-2 row-start-2 justify-self-end text-xs"
+        />
       </span>
     </button>
   );
