@@ -1864,7 +1864,7 @@ function PullRequestsColumn({
             {/* The page name remains the foreground anchor in both states; the live filters are
                 its compact scope, grouped as the second crumb rather than pretending each menu
                 is a separate page in the hierarchy. */}
-            <WorkspaceBreadcrumbItem current className="shrink-0">
+            <WorkspaceBreadcrumbItem current>
               <h1 className="truncate">Pull Requests</h1>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator />
