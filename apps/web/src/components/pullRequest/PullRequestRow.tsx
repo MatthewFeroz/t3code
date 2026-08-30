@@ -60,7 +60,7 @@ function PullRequestRowImpl({
         mergeability={entry.mergeability}
         baseBranch={entry.baseBranch}
       />
-      <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5">
+      <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5">
         <span className="col-start-1 row-start-1 block truncate text-sm font-medium text-foreground">
           {entry.title}
         </span>
