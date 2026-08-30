@@ -1,3 +1,4 @@
+import { SearchIcon } from "lucide-react";
 import { memo } from "react";
 
 import { cn } from "~/lib/utils";
@@ -59,9 +60,25 @@ function PullRequestRowImpl({
         mergeability={entry.mergeability}
         baseBranch={entry.baseBranch}
       />
-      <span className="min-w-0">
+      <span className="@container/pr-row-meta min-w-0 overflow-hidden">
         <span className="block truncate text-sm font-medium text-foreground">{entry.title}</span>
-        <PullRequestMetaLine className="mt-0.5 text-xs text-muted-foreground/70">
+        <PullRequestMetaLine className="mt-0.5 overflow-hidden text-xs text-muted-foreground/70">
+          {matchedElsewhere ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="flex shrink-0 items-center gap-1 rounded-full border border-border/60 px-1 text-[10px]" />
+                }
+              >
+                <span className="sr-only">matched in the description</span>
+                <SearchIcon aria-hidden className="size-3 shrink-0" />
+                <span aria-hidden className="hidden @xs/pr-row-meta:inline">
+                  matched in the description
+                </span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">Matched in the description</TooltipPopup>
+            </Tooltip>
+          ) : null}
           <span className="flex shrink-0 items-center gap-1">
             {showProvider ? (
               <Tooltip>
@@ -89,7 +106,7 @@ function PullRequestRowImpl({
           </span>
           {showProjectTitle ? <span className="truncate">{entry.repository}</span> : null}
           {environmentLabel ? (
-            <span className="max-w-32 shrink-0 truncate">{environmentLabel}</span>
+            <span className="min-w-0 max-w-32 truncate">{environmentLabel}</span>
           ) : null}
           <PullRequestActorLabel actor={entry.author} className="max-w-40" />
           {/* Only a verdict somebody has actually given: "review required" is the absence of
@@ -97,7 +114,7 @@ function PullRequestRowImpl({
           {entry.reviewDecision === "approved" || entry.reviewDecision === "changes-requested" ? (
             <span
               className={cn(
-                "shrink-0",
+                "min-w-0 truncate",
                 entry.reviewDecision === "approved"
                   ? "text-emerald-600/90 dark:text-emerald-400/80"
                   : "text-amber-600/90 dark:text-amber-400/80",
@@ -117,11 +134,6 @@ function PullRequestRowImpl({
               }}
             />
           )}
-          {matchedElsewhere ? (
-            <span className="shrink-0 rounded-full border border-border/60 px-1.5 text-[10px]">
-              matched in the description
-            </span>
-          ) : null}
         </PullRequestMetaLine>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-0.5 text-xs text-muted-foreground/70 tabular-nums">

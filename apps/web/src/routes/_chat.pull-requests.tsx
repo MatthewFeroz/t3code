@@ -1628,11 +1628,13 @@ function CompactFilterMenu<Value extends string>({
   value,
   options,
   onChange,
+  className,
 }: {
   label: string;
   value: Value;
   options: ReadonlyArray<PullRequestFilterOption<Value>>;
   onChange: (value: Value) => void;
+  className?: string;
 }) {
   const current = options.find((option) => option.value === value) ?? options[0];
   if (!current) return null;
@@ -1640,10 +1642,13 @@ function CompactFilterMenu<Value extends string>({
     <Menu>
       <MenuTrigger
         aria-label={label}
-        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+        className={cn(
+          "inline-flex h-7 min-w-0 items-center gap-1 rounded-md px-1.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground",
+          className,
+        )}
       >
-        {current.label}
-        <ChevronDownIcon aria-hidden className="size-3 text-muted-foreground/70" />
+        <span className="truncate">{current.label}</span>
+        <ChevronDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground/70" />
       </MenuTrigger>
       <MenuPopup align="start" side="bottom" className="min-w-40">
         <MenuRadioGroup value={value} onValueChange={(next) => onChange(next as Value)}>
@@ -1808,6 +1813,7 @@ function PullRequestsColumn({
   const inFlowSearchRef = useRef<HTMLDivElement | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const searchExpanded = searchOpen || searchValue.length > 0;
   // Mod+F belongs to this page's own search: the desktop shell binds no find-in-page, so the
   // shortcut would otherwise do nothing. Condensed, it unfolds the topbar search; at the top,
   // it focuses the in-flow bar and selects the query the way a find field would.
@@ -1861,19 +1867,23 @@ function PullRequestsColumn({
         {titlebarControls}
         {condensed ? (
           <WorkspaceBreadcrumb ariaLabel="Pull request scope" className="overflow-hidden">
-            {/* The page name remains the foreground anchor in both states; the live filters are
-                its compact scope, grouped as the second crumb rather than pretending each menu
-                is a separate page in the hierarchy. */}
-            <WorkspaceBreadcrumbItem current>
-              <h1 className="truncate">Pull Requests</h1>
-            </WorkspaceBreadcrumbItem>
-            <WorkspaceBreadcrumbSeparator />
+            {/* An expanded search owns the scarce horizontal space. The page title returns when
+                it folds, while the live filters remain available in both states. */}
+            {searchExpanded ? null : (
+              <>
+                <WorkspaceBreadcrumbItem current>
+                  <h1 className="truncate">Pull Requests</h1>
+                </WorkspaceBreadcrumbItem>
+                <WorkspaceBreadcrumbSeparator />
+              </>
+            )}
             <WorkspaceBreadcrumbItem className="shrink gap-1.5 overflow-hidden">
               <CompactFilterMenu
                 label="Filter by state"
                 value={state}
                 options={STATE_TABS}
                 onChange={onState}
+                className="shrink-0"
               />
               <CompactFilterMenu
                 label="Filter by involvement"
@@ -1900,7 +1910,7 @@ function PullRequestsColumn({
         )}
         <div className="min-w-0 flex-1" />
         {condensed ? (
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-[8.125rem] shrink items-center gap-1.5">
             <ExpandableSearch
               searchInput={searchInput}
               searchValue={searchValue}
