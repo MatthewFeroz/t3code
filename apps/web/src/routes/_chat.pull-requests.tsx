@@ -1877,7 +1877,7 @@ function PullRequestsColumn({
                 <WorkspaceBreadcrumbSeparator />
               </>
             )}
-            <WorkspaceBreadcrumbItem className="shrink gap-1.5 overflow-hidden">
+            <WorkspaceBreadcrumbItem className="shrink gap-1.5">
               <CompactFilterMenu
                 label="Filter by state"
                 value={state}
