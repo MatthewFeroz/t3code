@@ -126,7 +126,6 @@ function PullRequestRowImpl({
           {entry.checksState === undefined ? null : (
             <PullRequestChecksPopover
               checksState={entry.checksState}
-              className="hidden @xs/pr-row-meta:inline-flex"
               environmentId={entry.environmentId}
               reference={{
                 projectId: entry.projectId,
