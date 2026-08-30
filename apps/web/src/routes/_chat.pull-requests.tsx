@@ -1873,7 +1873,7 @@ function PullRequestsColumn({
               <h1 className="truncate">Pull Requests</h1>
             </WorkspaceBreadcrumbItem>
             {searchExpanded ? null : <WorkspaceBreadcrumbSeparator />}
-            <WorkspaceBreadcrumbItem className="shrink-0 gap-1.5">
+            <WorkspaceBreadcrumbItem className="shrink gap-1.5">
               <CompactFilterMenu
                 label="Filter by state"
                 value={state}
