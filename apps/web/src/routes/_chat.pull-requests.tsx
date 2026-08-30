@@ -1721,7 +1721,7 @@ function ExpandableSearch({
     return (
       <div
         ref={containerRef}
-        className="w-56 shrink-0"
+        className="w-56 min-w-24 shrink"
         onFocus={() => onFocusWithin?.(true)}
         onBlur={() => {
           onFocusWithin?.(false);
@@ -1860,15 +1860,15 @@ function PullRequestsColumn({
       >
         {titlebarControls}
         {condensed ? (
-          <WorkspaceBreadcrumb ariaLabel="Pull request scope">
+          <WorkspaceBreadcrumb ariaLabel="Pull request scope" className="overflow-hidden">
             {/* The page name remains the foreground anchor in both states; the live filters are
                 its compact scope, grouped as the second crumb rather than pretending each menu
                 is a separate page in the hierarchy. */}
-            <WorkspaceBreadcrumbItem current>
+            <WorkspaceBreadcrumbItem current className="shrink-0">
               <h1 className="truncate">Pull Requests</h1>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator />
-            <WorkspaceBreadcrumbItem className="gap-1.5 overflow-hidden">
+            <WorkspaceBreadcrumbItem className="shrink gap-1.5 overflow-hidden">
               <CompactFilterMenu
                 label="Filter by state"
                 value={state}
@@ -1900,7 +1900,7 @@ function PullRequestsColumn({
         )}
         <div className="min-w-0 flex-1" />
         {condensed ? (
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
             <ExpandableSearch
               searchInput={searchInput}
               searchValue={searchValue}

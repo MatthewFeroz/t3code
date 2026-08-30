@@ -61,7 +61,7 @@ function PullRequestRowImpl({
       />
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium text-foreground">{entry.title}</span>
-        <PullRequestMetaLine className="mt-0.5 overflow-hidden text-xs text-muted-foreground/70">
+        <PullRequestMetaLine className="mt-0.5 text-xs text-muted-foreground/70">
           <span className="flex shrink-0 items-center gap-1">
             {showProvider ? (
               <Tooltip>
