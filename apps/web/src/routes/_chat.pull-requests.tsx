@@ -1867,17 +1867,13 @@ function PullRequestsColumn({
         {titlebarControls}
         {condensed ? (
           <WorkspaceBreadcrumb ariaLabel="Pull request scope" className="overflow-hidden">
-            {/* An expanded search owns the scarce horizontal space. The page title returns when
-                it folds, while the live filters remain available in both states. */}
-            {searchExpanded ? null : (
-              <>
-                <WorkspaceBreadcrumbItem current>
-                  <h1 className="truncate">Pull Requests</h1>
-                </WorkspaceBreadcrumbItem>
-                <WorkspaceBreadcrumbSeparator />
-              </>
-            )}
-            <WorkspaceBreadcrumbItem className="shrink gap-1.5">
+            {/* An expanded search owns the scarce horizontal space. The page title stays
+                available to readers while the live filters remain available in both states. */}
+            <WorkspaceBreadcrumbItem current className={cn(searchExpanded && "sr-only")}>
+              <h1 className="truncate">Pull Requests</h1>
+            </WorkspaceBreadcrumbItem>
+            {searchExpanded ? null : <WorkspaceBreadcrumbSeparator />}
+            <WorkspaceBreadcrumbItem className="shrink-0 gap-1.5">
               <CompactFilterMenu
                 label="Filter by state"
                 value={state}
@@ -1910,7 +1906,7 @@ function PullRequestsColumn({
         )}
         <div className="min-w-0 flex-1" />
         {condensed ? (
-          <div className="flex min-w-[8.125rem] shrink items-center gap-1.5">
+          <div className="flex shrink items-center gap-1.5">
             <ExpandableSearch
               searchInput={searchInput}
               searchValue={searchValue}
