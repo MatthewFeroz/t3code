@@ -113,7 +113,11 @@ function PullRequestRowImpl({
           {environmentLabel ? (
             <span className="min-w-0 max-w-32 truncate">{environmentLabel}</span>
           ) : null}
-          <PullRequestActorLabel actor={entry.author} className="min-w-4 max-w-40" />
+          <PullRequestActorLabel
+            actor={entry.author}
+            className="min-w-4 max-w-40"
+            labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
+          />
           {/* Only a verdict somebody has actually given: "review required" is the absence of
               one, and saying so on every unreviewed row would say nothing. */}
           {entry.reviewDecision === "approved" || entry.reviewDecision === "changes-requested" ? (
