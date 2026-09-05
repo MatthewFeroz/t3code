@@ -4,7 +4,8 @@ import { collectLimitSources, collectLimitsGroups } from "@t3tools/shared/usageL
 export interface SubscriptionUsageRow {
   readonly label: string;
   readonly window: string;
-  readonly usedPercent: number | null;
+  // Omit unavailable values: iOS widget storage accepts property lists, not null.
+  readonly usedPercent?: number;
   readonly resetLabel: string;
   readonly expiresAt: number;
   readonly checkedAt: number;
@@ -35,7 +36,6 @@ export function buildSubscriptionUsageSnapshot(
           limits.unavailable?.reason === "unsupported"
             ? "No subscription limits"
             : "Limits unavailable",
-        usedPercent: null,
         resetLabel: "Open app for details",
         checkedAt,
         expiresAt: 0,
