@@ -3,6 +3,7 @@ import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import { PrimaryConnectionTarget, type PreparedConnection } from "../connection/model.ts";
+import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import { remoteHttpClientLayer } from "../rpc/http.ts";
 import { fetchEnvironmentSkill, fetchEnvironmentSkills } from "./skills.ts";
@@ -90,10 +91,35 @@ describe("environment skills HTTP", () => {
       const proofs: Array<{ method: string; url: string; accessToken?: string }> = [];
       const calls: RequestInit[] = [];
       yield* fetchEnvironmentSkill(
-        { ...prepared, httpAuthorization: { _tag: "Dpop", accessToken: "relay-token" } },
+        {
+          ...prepared,
+          httpAuthorization: {
+            _tag: "Dpop",
+            accessToken: "relay-token",
+            expiresAtEpochMs: 3600000,
+          },
+        },
         { projectId: ProjectId.make("relay-project") },
         { scope: "project", name: "example" },
       ).pipe(
+        Effect.provideService(
+          RemoteEnvironmentAuthorization,
+          RemoteEnvironmentAuthorization.of({
+            authorizeBearer: () => Effect.die("Unexpected bearer preparation"),
+            authorizeDpop: () => Effect.die("Unexpected socket preparation"),
+            authorizeDpopHttp: () =>
+              Effect.succeed({
+                environmentId: prepared.environmentId,
+                label: prepared.label,
+                httpBaseUrl: prepared.httpBaseUrl,
+                httpAuthorization: {
+                  _tag: "Dpop" as const,
+                  accessToken: "relay-token",
+                  expiresAtEpochMs: 3600000,
+                },
+              }),
+          }),
+        ),
         Effect.provideService(
           ManagedRelayDpopSigner,
           ManagedRelayDpopSigner.of({
