@@ -46,6 +46,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitPullRequestArrowIcon,
+  LibraryBigIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -1746,6 +1747,17 @@ function OpenCommandPaletteDialog(props: {
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/settings" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:skills",
+    searchTerms: ["open skills", "skills", "agents", "SKILL.md", "project", "global"],
+    title: "Open skills",
+    icon: <LibraryBigIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/skills" });
     },
   });
 

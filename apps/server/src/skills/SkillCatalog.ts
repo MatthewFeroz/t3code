@@ -1,0 +1,184 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+
+import type { AgentSkillDetail, AgentSkillScope, AgentSkillSummary } from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import { parse as parseYaml } from "yaml";
+
+import * as ProcessRunner from "../processRunner.ts";
+
+const MAX_CATALOG_OUTPUT_BYTES = 2 * 1024 * 1024;
+const MAX_SKILL_CONTENT_BYTES = 512 * 1024;
+
+const CliSkillEntry = Schema.Struct({
+  name: Schema.String,
+  path: Schema.String,
+  scope: Schema.Literals(["project", "global"]),
+  agents: Schema.Array(Schema.String),
+  source: Schema.NullOr(Schema.String),
+  sourceUrl: Schema.NullOr(Schema.String),
+  sourceType: Schema.NullOr(Schema.String),
+});
+
+const decodeCliSkills = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(CliSkillEntry)),
+);
+
+export class SkillCatalogError extends Data.TaggedError("SkillCatalogError")<{
+  readonly operation: "discover" | "read";
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
+
+function catalogError(
+  operation: SkillCatalogError["operation"],
+  message: string,
+  cause: unknown,
+): SkillCatalogError {
+  return new SkillCatalogError({ operation, message, cause });
+}
+
+function frontmatterBlock(content: string): RegExpExecArray | null {
+  return /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+}
+
+export function skillDescriptionFromMarkdown(content: string): string {
+  const match = frontmatterBlock(content);
+  if (!match?.[1]) return "";
+  try {
+    const frontmatter: unknown = parseYaml(match[1]);
+    if (typeof frontmatter !== "object" || frontmatter === null) return "";
+    const description = Reflect.get(frontmatter, "description");
+    return typeof description === "string" ? description.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+export function skillBodyFromMarkdown(content: string): string {
+  const match = frontmatterBlock(content);
+  return (match ? content.slice(match[0].length) : content).trim();
+}
+
+const readSkillMarkdown = (skillPath: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const filePath = NodePath.join(skillPath, "SKILL.md");
+      const info = await NodeFSP.stat(filePath);
+      if (info.size > MAX_SKILL_CONTENT_BYTES) {
+        throw new Error(`SKILL.md exceeds ${MAX_SKILL_CONTENT_BYTES} bytes`);
+      }
+      return NodeFSP.readFile(filePath, "utf8");
+    },
+    catch: (cause) => catalogError("read", "Could not read SKILL.md", cause),
+  });
+
+export class SkillCatalog extends Context.Service<
+  SkillCatalog,
+  {
+    readonly list: (
+      cwd?: string,
+    ) => Effect.Effect<ReadonlyArray<AgentSkillSummary>, SkillCatalogError>;
+    readonly detail: (
+      scope: AgentSkillScope,
+      name: string,
+      cwd?: string,
+    ) => Effect.Effect<Option.Option<AgentSkillDetail>, SkillCatalogError>;
+  }
+>()("t3/skills/SkillCatalog") {}
+
+export const make = Effect.fn("SkillCatalog.make")(function* () {
+  const runner = yield* ProcessRunner.ProcessRunner;
+  const catalogCache = yield* Ref.make<
+    Option.Option<{
+      readonly cwd: string | undefined;
+      readonly skills: ReadonlyArray<AgentSkillSummary>;
+    }>
+  >(Option.none());
+
+  const discoverScope = Effect.fn("SkillCatalog.discoverScope")(function* (
+    scope: AgentSkillScope,
+    cwd?: string,
+  ) {
+    const result = yield* runner
+      .run({
+        command: "npx",
+        cwd,
+        args: ["--yes", "skills", "list", ...(scope === "global" ? ["--global"] : []), "--json"],
+        timeout: "30 seconds",
+        maxOutputBytes: MAX_CATALOG_OUTPUT_BYTES,
+        env: { DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" },
+      })
+      .pipe(
+        Effect.mapError((cause) => catalogError("discover", "Could not run the skills CLI", cause)),
+      );
+
+    if (result.code !== 0 || result.stdoutTruncated || result.stdoutInvalidUtf8) {
+      return yield* catalogError(
+        "discover",
+        "The skills CLI did not return a complete catalog",
+        result.stderr,
+      );
+    }
+
+    const entries = yield* decodeCliSkills(result.stdout).pipe(
+      Effect.mapError((cause) =>
+        catalogError("discover", "The skills CLI returned invalid JSON", cause),
+      ),
+    );
+
+    return yield* Effect.forEach(
+      entries.filter((entry) => entry.scope === scope),
+      (entry) =>
+        readSkillMarkdown(entry.path).pipe(
+          Effect.map(
+            (content): AgentSkillSummary => ({
+              ...entry,
+              description: skillDescriptionFromMarkdown(content),
+            }),
+          ),
+          // A skill can disappear between CLI discovery and this read. Keep it
+          // visible and let the detail request report the failed read if selected.
+          Effect.orElseSucceed((): AgentSkillSummary => ({ ...entry, description: "" })),
+        ),
+      { concurrency: 8 },
+    );
+  });
+
+  const list = Effect.fn("SkillCatalog.list")(function* (cwd?: string) {
+    const scopes = cwd === undefined ? (["global"] as const) : (["project", "global"] as const);
+    const skills = (yield* Effect.forEach(scopes, (scope) => discoverScope(scope, cwd), {
+      concurrency: "unbounded",
+    })).flat();
+    yield* Ref.set(catalogCache, Option.some({ cwd, skills }));
+    return skills;
+  });
+
+  const detail = Effect.fn("SkillCatalog.detail")(function* (
+    scope: AgentSkillScope,
+    name: string,
+    cwd?: string,
+  ) {
+    if (scope === "project" && cwd === undefined) return Option.none<AgentSkillDetail>();
+    const cached = yield* Ref.get(catalogCache);
+    const skills =
+      Option.isSome(cached) && cached.value.cwd === cwd
+        ? cached.value.skills.filter((skill) => skill.scope === scope)
+        : yield* discoverScope(scope, cwd);
+    const summary = skills.find((skill) => skill.name === name);
+    if (!summary) return Option.none<AgentSkillDetail>();
+    const markdown = yield* readSkillMarkdown(summary.path);
+    return Option.some({ ...summary, content: skillBodyFromMarkdown(markdown) });
+  });
+
+  return SkillCatalog.of({ list, detail });
+});
+
+export const layer = Layer.effect(SkillCatalog, make());
