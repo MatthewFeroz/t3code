@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import type { AgentSkillDetail, AgentSkillScope, AgentSkillSummary } from "@t3tools/contracts";
@@ -71,11 +72,23 @@ const readSkillMarkdown = (skillPath: string) =>
   Effect.tryPromise({
     try: async () => {
       const filePath = NodePath.join(skillPath, "SKILL.md");
-      const info = await NodeFSP.stat(filePath);
-      if (info.size > MAX_SKILL_CONTENT_BYTES) {
-        throw new Error(`SKILL.md exceeds ${MAX_SKILL_CONTENT_BYTES} bytes`);
+      const file = await NodeFSP.open(filePath, "r");
+      try {
+        // Read one extra byte to detect growth without allocating based on file size.
+        const buffer = Buffer.alloc(MAX_SKILL_CONTENT_BYTES + 1);
+        let length = 0;
+        while (length < buffer.length) {
+          const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+          if (bytesRead === 0) break;
+          length += bytesRead;
+        }
+        if (length > MAX_SKILL_CONTENT_BYTES) {
+          throw new Error(`SKILL.md exceeds ${MAX_SKILL_CONTENT_BYTES} bytes`);
+        }
+        return buffer.toString("utf8", 0, length);
+      } finally {
+        await file.close();
       }
-      return NodeFSP.readFile(filePath, "utf8");
     },
     catch: (cause) => catalogError("read", "Could not read SKILL.md", cause),
   });
@@ -107,11 +120,31 @@ export const make = Effect.fn("SkillCatalog.make")(function* () {
     scope: AgentSkillScope,
     cwd?: string,
   ) {
+    // npm exec resolves packages and bins from its prefix. An empty prefix prevents
+    // a project's installed skills package or executable from shadowing the pinned CLI.
+    const prefix = yield* Effect.acquireRelease(
+      Effect.tryPromise({
+        try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-skills-cli-")),
+        catch: (cause) => catalogError("discover", "Could not prepare the skills CLI", cause),
+      }),
+      (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+    );
     const result = yield* runner
       .run({
         command: "npx",
         cwd,
-        args: ["--yes", "skills", "list", ...(scope === "global" ? ["--global"] : []), "--json"],
+        args: [
+          "--yes",
+          "--ignore-scripts",
+          "--prefix",
+          prefix,
+          "--package=skills@1.5.23",
+          "--",
+          "skills",
+          "list",
+          ...(scope === "global" ? ["--global"] : []),
+          "--json",
+        ],
         timeout: "30 seconds",
         maxOutputBytes: MAX_CATALOG_OUTPUT_BYTES,
         env: { DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" },
@@ -138,19 +171,17 @@ export const make = Effect.fn("SkillCatalog.make")(function* () {
       entries.filter((entry) => entry.scope === scope),
       (entry) =>
         readSkillMarkdown(entry.path).pipe(
-          Effect.map(
-            (content): AgentSkillSummary => ({
-              ...entry,
-              description: skillDescriptionFromMarkdown(content),
-            }),
-          ),
+          Effect.map((content): AgentSkillSummary => ({
+            ...entry,
+            description: skillDescriptionFromMarkdown(content),
+          })),
           // A skill can disappear between CLI discovery and this read. Keep it
           // visible and let the detail request report the failed read if selected.
           Effect.orElseSucceed((): AgentSkillSummary => ({ ...entry, description: "" })),
         ),
       { concurrency: 8 },
     );
-  });
+  }, Effect.scoped);
 
   const list = Effect.fn("SkillCatalog.list")(function* (cwd?: string) {
     const scopes = cwd === undefined ? (["global"] as const) : (["project", "global"] as const);

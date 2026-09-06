@@ -249,7 +249,10 @@ function SkillDetailView({ detail }: { detail: AgentSkillDetail }) {
 }
 
 export function SkillsPage() {
-  const { environments } = useEnvironments();
+  const { environments: allEnvironments } = useEnvironments();
+  const environments = allEnvironments.filter(
+    (environment) => environment.serverConfig?.environment.capabilities.skills === true,
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useActiveEnvironmentId();
   const projects = useProjects();

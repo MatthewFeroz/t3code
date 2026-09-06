@@ -1750,16 +1750,22 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  actionItems.push({
-    kind: "action",
-    value: "action:skills",
-    searchTerms: ["open skills", "skills", "agents", "SKILL.md", "project", "global"],
-    title: "Open skills",
-    icon: <LibraryBigIcon className={ITEM_ICON_CLASS} />,
-    run: async () => {
-      await navigate({ to: "/skills" });
-    },
-  });
+  if (
+    environments.some(
+      (environment) => environment.serverConfig?.environment.capabilities.skills === true,
+    )
+  ) {
+    actionItems.push({
+      kind: "action",
+      value: "action:skills",
+      searchTerms: ["open skills", "skills", "agents", "SKILL.md", "project", "global"],
+      title: "Open skills",
+      icon: <LibraryBigIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/skills" });
+      },
+    });
+  }
 
   // There is no projects listing page; the action targets the contextual
   // project (active thread/draft, falling back to the first sidebar group).

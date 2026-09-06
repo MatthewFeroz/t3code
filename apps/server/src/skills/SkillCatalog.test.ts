@@ -3,6 +3,8 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import { vi } from "vite-plus/test";
+
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -10,6 +12,10 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ProcessRunner from "../processRunner.ts";
 import { make, skillBodyFromMarkdown, skillDescriptionFromMarkdown } from "./SkillCatalog.ts";
+
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+}));
 
 const runOutput = (stdout: string): ProcessRunner.ProcessRunOutput => ({
   stdout,
@@ -123,7 +129,21 @@ it.effect("discovers both CLI scopes and reads only catalogued skill files", () 
       expect(invocations).toHaveLength(2);
       expect(invocations.every((input) => input.cwd === tempDir)).toBe(true);
       expect(invocations.every((input) => input.command === "npx")).toBe(true);
-      expect(invocations.every((input) => input.args.includes("skills"))).toBe(true);
+      expect(invocations.every((input) => input.args.includes("--package=skills@1.5.23"))).toBe(
+        true,
+      );
+      for (const input of invocations) {
+        const prefix = input.args[input.args.indexOf("--prefix") + 1];
+        expect(prefix).not.toBe(tempDir);
+        expect(
+          yield* Effect.promise(() =>
+            NodeFSP.access(prefix!).then(
+              () => false,
+              () => true,
+            ),
+          ),
+        ).toBe(true);
+      }
     }),
   ),
 );
@@ -201,4 +221,65 @@ it.effect("scans only global skills when no project is selected", () =>
     expect(invocations[0]?.args).toContain("--global");
     expect(invocations[0]?.cwd).toBeUndefined();
   }),
+);
+
+it.effect("bounds skill reads, including files that grow after opening", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-skill-limit-")),
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true })),
+      );
+      const filePath = NodePath.join(root, "SKILL.md");
+      const limit = 512 * 1024;
+      const runner = ProcessRunner.ProcessRunner.of({
+        run: () =>
+          Effect.succeed(
+            runOutput(
+              JSON.stringify([
+                {
+                  name: "bounded",
+                  path: root,
+                  scope: "global",
+                  agents: [],
+                  source: null,
+                  sourceUrl: null,
+                  sourceType: null,
+                },
+              ]),
+            ),
+          ),
+      });
+      const catalog = yield* make().pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, runner),
+      );
+      for (const length of [0, limit]) {
+        yield* Effect.promise(() => NodeFSP.writeFile(filePath, "x".repeat(length)));
+        expect(Option.getOrThrow(yield* catalog.detail("global", "bounded")).content).toHaveLength(
+          length,
+        );
+      }
+      yield* catalog.list();
+      const open = NodeFSP.open;
+      let closed = false;
+      const spy = vi.spyOn(NodeFSP, "open").mockImplementationOnce(async (...args) => {
+        const file = await open(...args);
+        const close = file.close.bind(file);
+        vi.spyOn(file, "close").mockImplementation(async () => {
+          await close();
+          closed = true;
+        });
+        await NodeFSP.appendFile(filePath, "x");
+        return file;
+      });
+      yield* Effect.addFinalizer(() => Effect.sync(() => spy.mockRestore()));
+      const error = yield* catalog.detail("global", "bounded").pipe(Effect.flip);
+      expect(error.operation).toBe("read");
+      expect(error.cause).toEqual(new Error(`SKILL.md exceeds ${limit} bytes`));
+      expect(closed).toBe(true);
+      expect((yield* catalog.list())[0]?.description).toBe("");
+    }),
+  ),
 );

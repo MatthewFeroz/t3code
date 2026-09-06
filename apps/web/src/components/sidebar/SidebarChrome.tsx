@@ -156,6 +156,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const pullRequestsSupported = environments.some(
     (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
   );
+  const skillsSupported = environments.some(
+    (environment) => environment.serverConfig?.environment.capabilities.skills === true,
+  );
   const closeMobileSidebar = useCallback(() => {
     if (isMobile) {
       setOpenMobile(false);
@@ -217,11 +220,13 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handlePullRequestsClick}
             />
           ) : null}
-          <SidebarUtilityItem
-            icon={<LibraryBigIcon />}
-            label="Skills"
-            onClick={handleSkillsClick}
-          />
+          {skillsSupported ? (
+            <SidebarUtilityItem
+              icon={<LibraryBigIcon />}
+              label="Skills"
+              onClick={handleSkillsClick}
+            />
+          ) : null}
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
