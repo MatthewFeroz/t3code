@@ -360,7 +360,7 @@ it.effect("cancels abandoned scans and releases their discovery slots", () =>
         Effect.gen(function* () {
           active++;
           if (active === 2) yield* Deferred.succeed(entered, undefined);
-          if (block) yield* Effect.never;
+          if (block) return yield* Effect.never;
           return runOutput("[]");
         }).pipe(
           Effect.ensuring(
