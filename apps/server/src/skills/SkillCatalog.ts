@@ -1,11 +1,15 @@
 // @effect-diagnostics nodeBuiltinImport:off
+// Node FileHandle keeps bounded reads and descriptor cleanup in one try/finally.
+// The CLI also needs a private npm prefix independent of the selected project.
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import type { AgentSkillDetail, AgentSkillScope, AgentSkillSummary } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
+import * as Semaphore from "effect/Semaphore";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -32,19 +36,35 @@ const decodeCliSkills = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(CliSkillEntry)),
 );
 
-export class SkillCatalogError extends Data.TaggedError("SkillCatalogError")<{
-  readonly operation: "discover" | "read";
-  readonly message: string;
-  readonly cause: unknown;
-}> {}
-
-function catalogError(
-  operation: SkillCatalogError["operation"],
-  message: string,
-  cause: unknown,
-): SkillCatalogError {
-  return new SkillCatalogError({ operation, message, cause });
+export class SkillDiscoveryError extends Schema.TaggedError<SkillDiscoveryError>()(
+  "SkillDiscoveryError",
+  {
+    stage: Schema.Literals(["prepare", "execute", "output", "decode", "busy"]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return this.stage === "busy"
+      ? "Skill discovery is busy. Try refreshing again shortly."
+      : `Could not discover skills (${this.stage})`;
+  }
 }
+
+export class SkillReadError extends Schema.TaggedError<SkillReadError>()("SkillReadError", {
+  path: Schema.String,
+  cause: Schema.Defect(),
+}) {
+  override get message(): string {
+    return `Could not read ${this.path}`;
+  }
+}
+
+type SkillCatalogError = SkillDiscoveryError | SkillReadError;
+
+class DiscoveryKey extends Data.Class<{
+  readonly scope: AgentSkillScope;
+  readonly cwd: string | undefined;
+}> {}
 
 function frontmatterBlock(content: string): RegExpExecArray | null {
   return /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
@@ -90,7 +110,7 @@ const readSkillMarkdown = (skillPath: string) =>
         await file.close();
       }
     },
-    catch: (cause) => catalogError("read", "Could not read SKILL.md", cause),
+    catch: (cause) => new SkillReadError({ path: NodePath.join(skillPath, "SKILL.md"), cause }),
   });
 
 export class SkillCatalog extends Context.Service<
@@ -116,7 +136,7 @@ export const make = Effect.fn("SkillCatalog.make")(function* () {
     }>
   >(Option.none());
 
-  const discoverScope = Effect.fn("SkillCatalog.discoverScope")(function* (
+  const discoverUncached = Effect.fn("SkillCatalog.discoverScope")(function* (
     scope: AgentSkillScope,
     cwd?: string,
   ) {
@@ -125,7 +145,7 @@ export const make = Effect.fn("SkillCatalog.make")(function* () {
     const prefix = yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-skills-cli-")),
-        catch: (cause) => catalogError("discover", "Could not prepare the skills CLI", cause),
+        catch: (cause) => new SkillDiscoveryError({ stage: "prepare", cause }),
       }),
       (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
     );
@@ -149,22 +169,14 @@ export const make = Effect.fn("SkillCatalog.make")(function* () {
         maxOutputBytes: MAX_CATALOG_OUTPUT_BYTES,
         env: { DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" },
       })
-      .pipe(
-        Effect.mapError((cause) => catalogError("discover", "Could not run the skills CLI", cause)),
-      );
+      .pipe(Effect.mapError((cause) => new SkillDiscoveryError({ stage: "execute", cause })));
 
     if (result.code !== 0 || result.stdoutTruncated || result.stdoutInvalidUtf8) {
-      return yield* catalogError(
-        "discover",
-        "The skills CLI did not return a complete catalog",
-        result.stderr,
-      );
+      return yield* new SkillDiscoveryError({ stage: "output", cause: result.stderr });
     }
 
     const entries = yield* decodeCliSkills(result.stdout).pipe(
-      Effect.mapError((cause) =>
-        catalogError("discover", "The skills CLI returned invalid JSON", cause),
-      ),
+      Effect.mapError((cause) => new SkillDiscoveryError({ stage: "decode", cause })),
     );
 
     return yield* Effect.forEach(
@@ -182,6 +194,26 @@ export const make = Effect.fn("SkillCatalog.make")(function* () {
       { concurrency: 8 },
     );
   }, Effect.scoped);
+
+  const discoverySlots = yield* Semaphore.make(2);
+  // Only in-progress requests are shared: Refresh must see filesystem changes.
+  // Refuse excess distinct work before allocating prefixes or spawning processes.
+  const discoveries = yield* Cache.makeWith(
+    (key: DiscoveryKey) =>
+      discoverySlots
+        .withPermitsIfAvailable(1)(discoverUncached(key.scope, key.cwd))
+        .pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => new SkillDiscoveryError({ stage: "busy", cause: undefined }),
+              onSome: Effect.succeed,
+            }),
+          ),
+        ),
+    { capacity: 32, timeToLive: () => 0 },
+  );
+  const discoverScope = (scope: AgentSkillScope, cwd?: string) =>
+    Cache.get(discoveries, new DiscoveryKey({ scope, cwd }));
 
   const list = Effect.fn("SkillCatalog.list")(function* (cwd?: string) {
     const scopes = cwd === undefined ? (["global"] as const) : (["project", "global"] as const);

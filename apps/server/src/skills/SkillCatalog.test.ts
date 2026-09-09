@@ -6,6 +6,8 @@ import * as NodePath from "node:path";
 import { vi } from "vite-plus/test";
 
 import { expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -276,10 +278,105 @@ it.effect("bounds skill reads, including files that grow after opening", () =>
       });
       yield* Effect.addFinalizer(() => Effect.sync(() => spy.mockRestore()));
       const error = yield* catalog.detail("global", "bounded").pipe(Effect.flip);
-      expect(error.operation).toBe("read");
+      expect(error._tag).toBe("SkillReadError");
       expect(error.cause).toEqual(new Error(`SKILL.md exceeds ${limit} bytes`));
       expect(closed).toBe(true);
       expect((yield* catalog.list())[0]?.description).toBe("");
     }),
   ),
+);
+
+it.effect("shares matching scans, bounds distinct work, and refreshes after completion", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    let runs = 0;
+    let active = 0;
+    let peak = 0;
+    const runner = ProcessRunner.ProcessRunner.of({
+      run: () =>
+        Effect.gen(function* () {
+          runs++;
+          active++;
+          peak = Math.max(peak, active);
+          if (active === 2) yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+          return runOutput("[]");
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              active--;
+            }),
+          ),
+        ),
+    });
+    const catalog = yield* make().pipe(Effect.provideService(ProcessRunner.ProcessRunner, runner));
+    const first = yield* catalog.list("/project-a").pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    // Each subscriber joins the already-running project/global scans.
+    const subscribers = yield* Effect.forEach(Array.from({ length: 20 }), () =>
+      catalog.list("/project-a").pipe(Effect.forkChild),
+    );
+    yield* Effect.yieldNow;
+    const busy = yield* catalog.list("/project-b").pipe(Effect.flip);
+    expect(busy._tag).toBe("SkillDiscoveryError");
+    if (busy._tag === "SkillDiscoveryError") expect(busy.stage).toBe("busy");
+    expect(runs).toBe(2);
+    yield* Deferred.succeed(release, undefined);
+    yield* Fiber.join(first);
+    yield* Effect.forEach(subscribers, Fiber.join);
+    expect(runs).toBe(2);
+    expect(peak).toBe(2);
+    yield* catalog.list("/project-a");
+    expect(runs).toBe(4);
+    expect(active).toBe(0);
+  }),
+);
+
+it.effect("releases discovery slots after CLI failure and retries on refresh", () =>
+  Effect.gen(function* () {
+    let fail = true;
+    const runner = ProcessRunner.ProcessRunner.of({
+      run: () =>
+        Effect.sync(() => ({
+          ...runOutput("[]"),
+          code: ChildProcessSpawner.ExitCode(fail ? 1 : 0),
+        })),
+    });
+    const catalog = yield* make().pipe(Effect.provideService(ProcessRunner.ProcessRunner, runner));
+    expect((yield* catalog.list().pipe(Effect.flip))._tag).toBe("SkillDiscoveryError");
+    fail = false;
+    expect(yield* catalog.list()).toEqual([]);
+  }),
+);
+
+it.effect("cancels abandoned scans and releases their discovery slots", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    let active = 0;
+    let block = true;
+    const runner = ProcessRunner.ProcessRunner.of({
+      run: () =>
+        Effect.gen(function* () {
+          active++;
+          if (active === 2) yield* Deferred.succeed(entered, undefined);
+          if (block) yield* Effect.never;
+          return runOutput("[]");
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              active--;
+            }),
+          ),
+        ),
+    });
+    const catalog = yield* make().pipe(Effect.provideService(ProcessRunner.ProcessRunner, runner));
+    const request = yield* catalog.list("/project-a").pipe(Effect.forkChild);
+    yield* Deferred.await(entered);
+    yield* Fiber.interrupt(request);
+    expect(active).toBe(0);
+    block = false;
+    expect(yield* catalog.list("/project-a")).toEqual([]);
+    expect(active).toBe(0);
+  }),
 );

@@ -48,16 +48,13 @@ export const skillsHttpApiLayer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           const cwd = yield* resolveProjectDirectory(args.query.projectId);
-          const detail = yield* catalog
-            .detail(args.params.scope, args.params.name, cwd)
-            .pipe(
-              Effect.catch((cause) =>
-                failEnvironmentInternal(
-                  cause.operation === "read" ? "skill_read_failed" : "skills_discovery_failed",
-                  cause,
-                ),
-              ),
-            );
+          const detail = yield* catalog.detail(args.params.scope, args.params.name, cwd).pipe(
+            Effect.catchTags({
+              SkillReadError: (cause) => failEnvironmentInternal("skill_read_failed", cause),
+              SkillDiscoveryError: (cause) =>
+                failEnvironmentInternal("skills_discovery_failed", cause),
+            }),
+          );
           if (Option.isNone(detail)) {
             return yield* failEnvironmentNotFound("skill_not_found");
           }

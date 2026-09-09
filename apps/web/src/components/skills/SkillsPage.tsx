@@ -43,7 +43,7 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
-import { Input } from "../ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
@@ -529,19 +529,19 @@ function SkillsPageContent({
             )}
           >
             <div className="space-y-3 border-b border-border/65 p-3">
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  nativeInput
+              <InputGroup>
+                <InputGroupAddon>
+                  <SearchIcon aria-hidden />
+                </InputGroupAddon>
+                <InputGroupInput
                   type="search"
                   size="compact"
                   value={query}
                   onChange={(event) => setQuery(event.currentTarget.value)}
                   placeholder="Search skills"
                   aria-label="Search skills"
-                  className="[&_[data-slot=input]]:ps-8"
                 />
-              </div>
+              </InputGroup>
               {projectId !== null ? (
                 <ToggleGroup
                   variant="segmented"
