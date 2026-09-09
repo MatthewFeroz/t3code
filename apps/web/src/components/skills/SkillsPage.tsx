@@ -18,19 +18,17 @@ import {
 } from "lucide-react";
 import { connectionStatusText, type PreparedConnection } from "@t3tools/client-runtime/connection";
 import * as Option from "effect/Option";
-import {
-  type ReactNode,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Atom } from "effect/unstable/reactivity";
+import { type ReactNode, useDeferredValue, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getAgentSkill, listAgentSkills } from "../../environments/skills";
+import {
+  fetchEnvironmentSkill,
+  fetchEnvironmentSkills,
+} from "@t3tools/client-runtime/state/skills";
+import { connectionAtomRuntime } from "../../connection/runtime";
+import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useActiveEnvironmentId, useProjects } from "../../state/entities";
 import { usePreparedConnection } from "../../state/session";
@@ -51,27 +49,10 @@ import { ToggleGroup, Toggle } from "../ui/toggle-group";
 
 type ScopeFilter = "all" | AgentSkillScope;
 
-type CatalogState =
-  | { readonly status: "loading"; readonly skills: ReadonlyArray<AgentSkillSummary> }
-  | { readonly status: "ready"; readonly skills: ReadonlyArray<AgentSkillSummary> }
-  | {
-      readonly status: "error";
-      readonly skills: ReadonlyArray<AgentSkillSummary>;
-      readonly message: string;
-    };
-
-type DetailState =
-  | { readonly status: "idle" }
-  | { readonly status: "loading" }
-  | { readonly status: "ready"; readonly detail: AgentSkillDetail }
-  | { readonly status: "error"; readonly message: string };
+const EMPTY_SKILLS: ReadonlyArray<AgentSkillSummary> = [];
 
 const skillKey = (skill: Pick<AgentSkillSummary, "scope" | "name">): string =>
   `${skill.scope}:${skill.name}`;
-
-function errorMessage(cause: unknown, fallback: string): string {
-  return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
-}
 
 function sourceHref(value: string | null): string | null {
   if (!value) return null;
@@ -102,20 +83,8 @@ function ScopeBadge({ scope }: { scope: AgentSkillScope }) {
   );
 }
 
-function SkillListSkeleton() {
-  return (
-    <div className="space-y-1 p-2" aria-label="Loading skills">
-      {Array.from({ length: 7 }, (_, index) => (
-        <div key={index} className="space-y-2 rounded-lg px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <Skeleton className="h-3.5 w-32" />
-            <Skeleton className="h-4 w-12" />
-          </div>
-          <Skeleton className="h-3 w-full" />
-        </div>
-      ))}
-    </div>
-  );
+function SkillsLoading() {
+  return <Skeleton className="m-4 h-16" aria-label="Loading skills" />;
 }
 
 function SkillListItem({
@@ -149,29 +118,6 @@ function SkillListItem({
         </span>
       ) : null}
     </button>
-  );
-}
-
-function DetailLoading() {
-  return (
-    <WorkspacePageContainer aria-label="Loading skill instructions" className="min-w-0">
-      <div className="space-y-3">
-        <Skeleton className="h-6 w-52 max-w-full" />
-        <Skeleton className="h-4 w-4/5" />
-        <Skeleton className="h-4 w-3/5" />
-        <div className="flex gap-2">
-          <Skeleton className="h-5 w-16" />
-          <Skeleton className="h-5 w-20" />
-        </div>
-      </div>
-      <Skeleton className="h-4 w-32" />
-      <div className="space-y-3 border-t border-border pt-5">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-11/12" />
-        <Skeleton className="h-4 w-4/5" />
-      </div>
-    </WorkspacePageContainer>
   );
 }
 
@@ -401,56 +347,28 @@ function SkillsPageContent({
   projectId: ProjectId | null;
   selectors: ReactNode;
 }) {
-  const [catalog, setCatalog] = useState<CatalogState>({ status: "loading", skills: [] });
-  const [detail, setDetail] = useState<DetailState>({ status: "idle" });
+  const catalogAtom = useMemo(
+    () =>
+      prepared === null
+        ? null
+        : connectionAtomRuntime
+            .atom(fetchEnvironmentSkills(prepared, projectId === null ? {} : { projectId }))
+            .pipe(Atom.setIdleTTL(60_000)),
+    [prepared, projectId],
+  );
+  const catalog = useEnvironmentQuery(catalogAtom);
+  const skills = catalog.data ?? EMPTY_SKILLS;
+  const catalogError =
+    prepared === null ? "Connect to this environment to inspect its skills." : catalog.error;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<ScopeFilter>("all");
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
-  const catalogRequest = useRef(0);
-
-  const loadCatalog = useCallback(async () => {
-    const request = ++catalogRequest.current;
-    if (prepared === null) {
-      setCatalog({
-        status: "error",
-        skills: [],
-        message: "Connect to this environment to inspect its skills.",
-      });
-      setSelectedKey(null);
-      setDetail({ status: "idle" });
-      return;
-    }
-    setCatalog((current) => ({ status: "loading", skills: current.skills }));
-    try {
-      const skills = await listAgentSkills(prepared, projectId);
-      if (request !== catalogRequest.current) return;
-      setCatalog({ status: "ready", skills });
-      setSelectedKey((current) => {
-        if (current && skills.some((skill) => skillKey(skill) === current)) return current;
-        return skills[0] ? skillKey(skills[0]) : null;
-      });
-    } catch (cause) {
-      if (request !== catalogRequest.current) return;
-      setCatalog((current) => ({
-        status: "error",
-        skills: current.skills,
-        message: errorMessage(cause, "T3 Code could not read the skills catalog."),
-      }));
-    }
-  }, [prepared, projectId]);
-
-  useEffect(() => {
-    void loadCatalog();
-    return () => {
-      catalogRequest.current += 1;
-    };
-  }, [loadCatalog]);
 
   const filteredSkills = useMemo(
     () =>
-      catalog.skills.filter((skill) => {
+      skills.filter((skill) => {
         if (scope !== "all" && skill.scope !== scope) return false;
         if (!deferredQuery) return true;
         return [skill.name, skill.description, skill.path, skill.source ?? "", ...skill.agents]
@@ -458,7 +376,7 @@ function SkillsPageContent({
           .toLowerCase()
           .includes(deferredQuery);
       }),
-    [catalog.skills, deferredQuery, scope],
+    [skills, deferredQuery, scope],
   );
 
   const selected = useMemo(
@@ -467,30 +385,18 @@ function SkillsPageContent({
     [filteredSkills, selectedKey],
   );
 
-  useEffect(() => {
-    if (!selected || prepared === null) {
-      setDetail({ status: "idle" });
-      return;
-    }
-    let active = true;
-    setDetail({ status: "loading" });
-    void getAgentSkill(prepared, projectId, selected).then(
-      (next) => {
-        if (active) setDetail({ status: "ready", detail: next });
-      },
-      (cause: unknown) => {
-        if (active) {
-          setDetail({
-            status: "error",
-            message: errorMessage(cause, "T3 Code could not read this SKILL.md file."),
-          });
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [selected, prepared, projectId]);
+  const detailAtom = useMemo(
+    () =>
+      prepared === null || selected === null
+        ? null
+        : connectionAtomRuntime
+            .atom(
+              fetchEnvironmentSkill(prepared, projectId === null ? {} : { projectId }, selected),
+            )
+            .pipe(Atom.setIdleTTL(60_000)),
+    [prepared, projectId, selected],
+  );
+  const detail = useEnvironmentQuery(detailAtom);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
@@ -506,19 +412,19 @@ function SkillsPageContent({
               className="ms-auto"
               size="xs"
               variant="ghost"
-              disabled={prepared === null || catalog.status === "loading"}
-              onClick={() => void loadCatalog()}
+              disabled={prepared === null || catalog.isPending}
+              onClick={catalog.refresh}
             >
               <RefreshCwIcon className="size-3.5" />
-              {catalog.status === "loading" ? "Refreshing" : "Refresh"}
+              {catalog.isPending ? "Refreshing" : "Refresh"}
             </Button>
           </div>
         </WorkspacePageHeader>
 
         {selectors}
-        {catalog.status === "error" ? (
+        {catalogError !== null ? (
           <p role="alert" className="px-5 py-3 text-sm text-destructive-foreground">
-            {catalog.message}
+            {catalogError}
           </p>
         ) : null}
         <div className="grid min-h-0 flex-1 border-t border-border lg:grid-cols-[19rem_minmax(0,1fr)]">
@@ -563,8 +469,8 @@ function SkillsPageContent({
             </div>
 
             <ScrollArea className="min-h-0 flex-1" scrollFade>
-              {catalog.status === "loading" && catalog.skills.length === 0 ? (
-                <SkillListSkeleton />
+              {catalog.isPending && skills.length === 0 ? (
+                <SkillsLoading />
               ) : filteredSkills.length > 0 ? (
                 <div className="space-y-1 p-2">
                   {filteredSkills.map((skill) => (
@@ -586,18 +492,18 @@ function SkillsPageContent({
                       <SearchIcon />
                     </EmptyMedia>
                     <EmptyTitle>
-                      {catalog.status === "error"
+                      {catalogError !== null
                         ? "Could not load skills"
-                        : catalog.skills.length === 0
+                        : skills.length === 0
                           ? "No skills installed"
                           : scope !== "all" && !query
                             ? `No ${scope} skills`
                             : "No matches"}
                     </EmptyTitle>
                     <EmptyDescription>
-                      {catalog.status === "error"
+                      {catalogError !== null
                         ? "Refresh to try again."
-                        : catalog.skills.length === 0
+                        : skills.length === 0
                           ? "Install skills on this environment, then refresh."
                           : "Try another search or scope."}
                     </EmptyDescription>
@@ -618,18 +524,18 @@ function SkillsPageContent({
               className="min-h-0 min-w-0 flex-1"
               scrollFade
             >
-              {detail.status === "loading" ? (
-                <DetailLoading />
-              ) : detail.status === "ready" ? (
-                <SkillDetailView detail={detail.detail} />
-              ) : detail.status === "error" ? (
+              {detail.isPending ? (
+                <SkillsLoading />
+              ) : detail.data !== null ? (
+                <SkillDetailView detail={detail.data} />
+              ) : detail.error !== null ? (
                 <Empty>
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
                       <BookOpenTextIcon />
                     </EmptyMedia>
                     <EmptyTitle>Could not read this skill</EmptyTitle>
-                    <EmptyDescription>{detail.message}</EmptyDescription>
+                    <EmptyDescription>{detail.error}</EmptyDescription>
                   </EmptyHeader>
                 </Empty>
               ) : null}

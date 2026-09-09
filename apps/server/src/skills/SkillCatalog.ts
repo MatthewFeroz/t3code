@@ -70,7 +70,7 @@ function frontmatterBlock(content: string): RegExpExecArray | null {
   return /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
 }
 
-export function skillDescriptionFromMarkdown(content: string): string {
+function skillDescriptionFromMarkdown(content: string): string {
   const match = frontmatterBlock(content);
   if (!match?.[1]) return "";
   try {
@@ -83,7 +83,7 @@ export function skillDescriptionFromMarkdown(content: string): string {
   }
 }
 
-export function skillBodyFromMarkdown(content: string): string {
+function skillBodyFromMarkdown(content: string): string {
   const match = frontmatterBlock(content);
   return (match ? content.slice(match[0].length) : content).trim();
 }
