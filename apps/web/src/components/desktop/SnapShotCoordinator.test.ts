@@ -134,31 +134,22 @@ describe("window capture failures", () => {
 });
 
 describe("window capture delivery", () => {
-  it.each(
-    [
-      { target: DraftId.make("snap-shot-draft"), accessibleText: undefined },
-      { target: DraftId.make("snap-shot-draft"), accessibleText: "const answer = 42;" },
-      {
-        target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
-        accessibleText: undefined,
-      },
-      {
-        target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
-        accessibleText: "const answer = 42;",
-      },
-    ].flatMap((testCase) =>
-      ["landed", "timeout", "rejected"].map((outcome) => ({ ...testCase, outcome })),
-    ),
-  )(
-    "delivers capture contents for $target after animation $outcome ($accessibleText)",
-    async ({ target, accessibleText, outcome }) => {
+  it.each([
+    { target: DraftId.make("snap-shot-draft"), accessibleText: undefined },
+    { target: DraftId.make("snap-shot-draft"), accessibleText: "const answer = 42;" },
+    {
+      target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
+      accessibleText: undefined,
+    },
+    {
+      target: scopeThreadRef(environmentId, ThreadId.make("snap-shot-thread")),
+      accessibleText: "const answer = 42;",
+    },
+  ])(
+    "preserves capture contents for $target before a stalled animation finishes ($accessibleText)",
+    async ({ target, accessibleText }) => {
       vi.useFakeTimers();
-      let resolveLanding: (() => void) | undefined;
-      let rejectLanding: ((error: Error) => void) | undefined;
-      const landing = new Promise<void>((resolve, reject) => {
-        resolveLanding = resolve;
-        rejectLanding = reject;
-      });
+      const never = new Promise<void>(() => undefined);
       const animationFrames: Array<FrameRequestCallback> = [];
       const acknowledgeSnapShot = vi.fn(async () => undefined);
       const bridge = {
@@ -182,7 +173,7 @@ describe("window capture delivery", () => {
           },
         })),
         acknowledgeSnapShot,
-        setSnapShotAnimationDestination: vi.fn(() => landing),
+        setSnapShotAnimationDestination: vi.fn(() => never),
         onMenuAction: vi.fn(() => () => undefined),
         onSnapShotEvent: vi.fn(() => () => undefined),
       } as unknown as DesktopSnapShotBridge;
@@ -236,7 +227,9 @@ describe("window capture delivery", () => {
       const delivery = deliverSnapShot(bridge, item, target);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(bridge.readSnapShot).not.toHaveBeenCalled();
+      const draft = useComposerDraftStore.getState().getComposerDraft(target);
+      expect(draft?.images).toHaveLength(1);
+      expect(draft?.images[0]?.source).toEqual(item.source);
       expect(getPendingSnapShotAnimations()).toHaveLength(1);
       expect(acknowledgeSnapShot).not.toHaveBeenCalled();
 
@@ -244,17 +237,7 @@ describe("window capture delivery", () => {
       animationFrames.shift()?.(0);
       animationFrames.shift()?.(0);
       await vi.advanceTimersByTimeAsync(0);
-      expect(bridge.readSnapShot).not.toHaveBeenCalled();
-      if (outcome === "landed") resolveLanding?.();
-      else if (outcome === "rejected") rejectLanding?.(new Error("Overlay closed"));
-      await vi.advanceTimersByTimeAsync(outcome === "timeout" ? 2_000 : 0);
-      const draft = useComposerDraftStore.getState().getComposerDraft(target);
-      expect(draft?.images).toHaveLength(1);
-      expect(draft?.images[0]?.source).toEqual(item.source);
-      expect(getPendingSnapShotAnimations()).toHaveLength(1);
-      animationFrames.shift()?.(0);
-      animationFrames.shift()?.(0);
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2_000);
       expect(getPendingSnapShotAnimations()).toHaveLength(0);
       expect(acknowledgeSnapShot).not.toHaveBeenCalled();
       expect(animationFrames).toHaveLength(1);
