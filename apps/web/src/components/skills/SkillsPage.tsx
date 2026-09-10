@@ -48,6 +48,7 @@ import { Skeleton } from "../ui/skeleton";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 
 type ScopeFilter = "all" | AgentSkillScope;
+type SkillProject = { readonly title: string; readonly workspaceRoot: string };
 
 const EMPTY_SKILLS: ReadonlyArray<AgentSkillSummary> = [];
 
@@ -75,10 +76,20 @@ const SKILL_MARKDOWN_COMPONENTS = {
   ),
 } satisfies Components;
 
-function ScopeBadge({ scope }: { scope: AgentSkillScope }) {
+function ScopeBadge({
+  scope,
+  project,
+}: {
+  scope: AgentSkillScope;
+  project?: SkillProject | undefined;
+}) {
   return (
-    <Badge size="sm" variant="secondary">
-      {scope === "global" ? "Global" : "Project"}
+    <Badge
+      size="sm"
+      variant="secondary"
+      title={scope === "project" ? project?.workspaceRoot : undefined}
+    >
+      {scope === "global" ? "Global" : project ? `Project · ${project.title}` : "Project"}
     </Badge>
   );
 }
@@ -121,7 +132,13 @@ function SkillListItem({
   );
 }
 
-function SkillDetailView({ detail }: { detail: AgentSkillDetail }) {
+function SkillDetailView({
+  detail,
+  project,
+}: {
+  detail: AgentSkillDetail;
+  project: SkillProject | undefined;
+}) {
   const href = sourceHref(detail.sourceUrl);
   return (
     <article className="min-w-0">
@@ -129,7 +146,7 @@ function SkillDetailView({ detail }: { detail: AgentSkillDetail }) {
         <header className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="min-w-0 break-words text-lg font-semibold">{detail.name}</h2>
-            <ScopeBadge scope={detail.scope} />
+            <ScopeBadge scope={detail.scope} project={project} />
           </div>
           {detail.description ? (
             <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
@@ -333,6 +350,7 @@ export function SkillsPage() {
       key={`${environmentId}:${projectId}`}
       prepared={connection}
       projectId={projectId}
+      project={project}
       selectors={selectors}
     />
   );
@@ -341,10 +359,12 @@ export function SkillsPage() {
 function SkillsPageContent({
   prepared,
   projectId,
+  project,
   selectors,
 }: {
   prepared: PreparedConnection | null;
   projectId: ProjectId | null;
+  project: SkillProject | undefined;
   selectors: ReactNode;
 }) {
   const catalogAtom = useMemo(
@@ -527,7 +547,7 @@ function SkillsPageContent({
               {detail.isPending ? (
                 <SkillsLoading />
               ) : detail.data !== null ? (
-                <SkillDetailView detail={detail.data} />
+                <SkillDetailView detail={detail.data} project={project} />
               ) : detail.error !== null ? (
                 <Empty>
                   <EmptyHeader>
