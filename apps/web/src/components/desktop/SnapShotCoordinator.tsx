@@ -138,6 +138,12 @@ export async function deliverSnapShot(
 ): Promise<void> {
   const store = useComposerDraftStore.getState();
   updateSnapShotAnimationSource(item.id, item.source);
+  if (getPendingSnapShotAnimations().some((animation) => animation.id === item.id)) {
+    // Let the placeholder publish its destination, then keep image decoding and
+    // synchronous persistence of accumulated attachments out of the flight.
+    await afterNextPaint();
+    await waitForSnapShotAnimationDestination(item.id).catch(() => undefined);
+  }
   const capture = await bridge.readSnapShot(item.id);
   const original = dataUrlToFile(capture.dataUrl, capture.name, capture.mimeType);
   const compressed = await compressImageToByteLimit(original, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
@@ -186,7 +192,6 @@ export async function deliverSnapShot(
   // otherwise the tile is missing for the frames between the landing and its first paint.
   if (getPendingSnapShotAnimations().some((animation) => animation.id === capture.id)) {
     await afterNextPaint();
-    await waitForSnapShotAnimationDestination(capture.id).catch(() => undefined);
     finishSnapShotAnimation(capture.id);
     await afterNextPaint();
   }
