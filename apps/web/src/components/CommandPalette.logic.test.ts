@@ -248,7 +248,7 @@ describe("buildProjectActionItems", () => {
 });
 
 describe("buildProjectSelectorGroups", () => {
-  it("moves favorites into their own section and numbers the displayed order", () => {
+  it("moves favorites into their own section, preserves priority, and numbers the result", () => {
     const projects = [
       { ...makeProject({ id: ProjectId.make("alpha"), title: "Alpha" }), displayName: "Alpha" },
       { ...makeProject({ id: ProjectId.make("beta"), title: "Beta" }), displayName: "Beta" },
@@ -266,12 +266,12 @@ describe("buildProjectSelectorGroups", () => {
       runProject: async () => undefined,
     });
 
-    const groups = buildProjectSelectorGroups(items);
+    const groups = buildProjectSelectorGroups(items, "new-thread-in:environment-local:gamma");
 
     expect(groups.map((group) => group.label)).toEqual(["Favorites", "Projects"]);
     expect(groups.map((group) => group.items.map((item) => item.title))).toEqual([
       ["Beta"],
-      ["Alpha", "Gamma"],
+      ["Gamma", "Alpha"],
     ]);
     expect(groups.flatMap((group) => group.items.map((item) => item.shortcutCommand))).toEqual([
       "thread.jump.1",

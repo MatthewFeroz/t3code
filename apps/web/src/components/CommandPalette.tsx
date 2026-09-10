@@ -72,7 +72,7 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
-import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
+import { persistClientSettingsUpdate, useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -588,7 +588,6 @@ function OpenCommandPaletteDialog(props: {
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const clientSettings = useClientSettings();
-  const updateClientSettings = useUpdateClientSettings();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
@@ -1104,10 +1103,16 @@ function OpenCommandPaletteDialog(props: {
             isFavorite,
             label: isFavorite ? "Remove from favorites" : "Add to favorites",
             toggle: () => {
-              void updateClientSettings({
-                favoriteProjectKeys: isFavorite
-                  ? clientSettings.favoriteProjectKeys.filter((key) => key !== group.projectKey)
-                  : [...clientSettings.favoriteProjectKeys, group.projectKey],
+              void persistClientSettingsUpdate((current) => {
+                const currentIsFavorite = current.favoriteProjectKeys.includes(group.projectKey);
+                return {
+                  ...current,
+                  favoriteProjectKeys: currentIsFavorite
+                    ? current.favoriteProjectKeys.filter((key) => key !== group.projectKey)
+                    : [...current.favoriteProjectKeys, group.projectKey],
+                };
+              }).catch((error) => {
+                console.error("Failed to update project favorite", error);
               });
             },
           };
@@ -1168,12 +1173,18 @@ function OpenCommandPaletteDialog(props: {
       pickerProjects,
       projectEnvironmentLocationById,
       projectGroupByTargetKey,
-      updateClientSettings,
     ],
   );
   const projectThreadGroups = useMemo(
     () => buildProjectSelectorGroups(projectThreadItems),
     [projectThreadItems],
+  );
+  const liveProjectThreadGroups = useMemo(
+    () =>
+      currentView?.projectSelectorPriorityValue
+        ? buildProjectSelectorGroups(projectThreadItems, currentView.projectSelectorPriorityValue)
+        : projectThreadGroups,
+    [currentView?.projectSelectorPriorityValue, projectThreadGroups, projectThreadItems],
   );
 
   const allThreadItems = useMemo(
@@ -1252,6 +1263,9 @@ function OpenCommandPaletteDialog(props: {
           addonIcon: view.addonIcon,
           groups: view.groups,
           ...(view.initialQuery ? { initialQuery: view.initialQuery } : {}),
+          ...(view.projectSelectorPriorityValue
+            ? { projectSelectorPriorityValue: view.projectSelectorPriorityValue }
+            : {}),
         },
       ]);
       setHighlightedItemValue(null);
@@ -1562,15 +1576,10 @@ function OpenCommandPaletteDialog(props: {
       currentProjectEnvironmentId && currentProjectId
         ? `new-thread-in:${currentProjectEnvironmentId}:${currentProjectId}`
         : null;
-    const prioritized = currentPrefix
-      ? [
-          ...projectThreadItems.filter((item) => item.value === currentPrefix),
-          ...projectThreadItems.filter((item) => item.value !== currentPrefix),
-        ]
-      : projectThreadItems;
     pushPaletteView({
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: buildProjectSelectorGroups(prioritized),
+      groups: buildProjectSelectorGroups(projectThreadItems, currentPrefix),
+      ...(currentPrefix ? { projectSelectorPriorityValue: currentPrefix } : {}),
     });
   }, [
     clearOpenIntent,
@@ -1840,7 +1849,7 @@ function OpenCommandPaletteDialog(props: {
           buildAddProjectRemoteSourceReadiness(sourceControlDiscovery.data),
         )
       : isProjectSelectorView
-        ? projectThreadGroups
+        ? liveProjectThreadGroups
         : (currentView?.groups ?? rootGroups);
 
   const filteredGroups = filterCommandPaletteGroups({

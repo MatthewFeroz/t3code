@@ -168,6 +168,7 @@ export interface CommandPaletteView {
   readonly addonIcon: ReactNode;
   readonly groups: ReadonlyArray<CommandPaletteGroup>;
   readonly initialQuery?: string;
+  readonly projectSelectorPriorityValue?: string;
 }
 
 export function enumerateCommandPaletteItems(
@@ -225,9 +226,16 @@ export function buildProjectActionItems(input: {
 
 export function buildProjectSelectorGroups(
   items: ReadonlyArray<CommandPaletteActionItem>,
+  priorityValue?: string | null,
 ): CommandPaletteGroup[] {
-  const favorites = items.filter((item) => item.favorite?.isFavorite === true);
-  const projects = items.filter((item) => item.favorite?.isFavorite !== true);
+  const orderedItems = priorityValue
+    ? [
+        ...items.filter((item) => item.value === priorityValue),
+        ...items.filter((item) => item.value !== priorityValue),
+      ]
+    : items;
+  const favorites = orderedItems.filter((item) => item.favorite?.isFavorite === true);
+  const projects = orderedItems.filter((item) => item.favorite?.isFavorite !== true);
   const enumeratedItems = enumerateCommandPaletteItems([...favorites, ...projects]);
 
   return [

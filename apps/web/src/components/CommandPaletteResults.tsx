@@ -183,7 +183,6 @@ function CommandPaletteResultRow(props: {
         if ((event.target as Element).closest("[data-command-palette-favorite]")) {
           event.preventDefault();
           event.stopPropagation();
-          props.item.favorite?.toggle();
         }
       }}
       onClick={() => {
@@ -219,7 +218,6 @@ function CommandPaletteResultRow(props: {
             render={
               <button
                 type="button"
-                tabIndex={-1}
                 data-command-palette-favorite
                 className={cn(
                   "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
@@ -230,6 +228,7 @@ function CommandPaletteResultRow(props: {
                 aria-label={props.item.favorite.label}
                 onClick={(event) => {
                   event.stopPropagation();
+                  props.item.favorite?.toggle();
                 }}
               >
                 <StarIcon
