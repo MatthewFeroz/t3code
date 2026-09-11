@@ -60,6 +60,14 @@ describe("subscription widget snapshots", () => {
     expect(snapshot.deepLink).toBe(deepLink);
     expect(JSON.stringify(snapshot)).not.toContain("private@example.com");
   });
+  it("never shows an email-bearing instance name on the home screen", () => {
+    const snapshot = buildSubscriptionUsageSnapshot(
+      presentations([provider({ displayName: "work@example.com" })]),
+      deepLink,
+    );
+    expect(snapshot.rows[0]?.label).toBe("Codex");
+    expect(JSON.stringify(snapshot)).not.toContain("example.com");
+  });
   it("clears data after removing environments and hides disabled providers", () => {
     expect(buildSubscriptionUsageSnapshot(new Map(), deepLink).rows).toEqual([]);
     expect(

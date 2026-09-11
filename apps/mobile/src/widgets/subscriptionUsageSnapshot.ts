@@ -61,8 +61,15 @@ export function buildSubscriptionUsageSnapshot(
     }
   };
   const driverLabel = (driver: string) => ({ codex: "Codex", claudeAgent: "Claude" })[driver];
-  const providerLimitsLabel = (provider: ServerProvider) =>
-    provider.displayName?.trim() || driverLabel(provider.driver) || String(provider.driver);
+  // Home screens have no reveal control, so email-bearing names fall back to the driver.
+  const providerLimitsLabel = (provider: ServerProvider) => {
+    const displayName = provider.displayName?.trim();
+    return (
+      (displayName && !displayName.includes("@") ? displayName : undefined) ||
+      driverLabel(provider.driver) ||
+      String(provider.driver)
+    );
+  };
   for (const group of collectLimitsGroups(presentations)) {
     for (const provider of group.providers) {
       if (!provider.usageLimits) continue;
