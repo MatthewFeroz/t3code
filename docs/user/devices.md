@@ -88,3 +88,19 @@ T3 provides discovery, streaming, and control. Arrange app builds,
 installation, and connectivity to development servers such as Metro separately.
 A simulator on another machine cannot reach Metro through your environment's
 localhost without forwarding or another reachable address.
+
+## Connect simulator hosts over SSH
+
+You can run iOS Simulators and Android Emulators on another machine and connect to them over SSH.
+
+1. Open **Settings → Projects**.
+2. Select the environment that owns the project.
+3. Add an SSH simulator host and enter its host details.
+4. Use **Probe** to check the host and discover the available platform tools.
+5. Save the host after the probe succeeds.
+
+T3 Code uses the selected environment’s SSH keys and configuration for the connection. Saved hosts can be edited or removed from the same project settings screen. Removing a host closes its device sessions and stops T3-owned helpers when the host is reachable; simulators already running on that machine are not shut down.
+
+Device discovery and device operations remain host-aware, so devices with the same identifier on different machines do not collide. The pinned device hub is installed on first use. Agent access is separate from manual device use and requires its own consent before agent tools are started.
+
+App builds, app delivery, and Metro forwarding are not provided by the SSH simulator-host setup. Configure those separately.
