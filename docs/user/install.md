@@ -72,7 +72,8 @@ selected environment. Codex and OpenCode use official production releases; Claud
 uses its stable channel. Antigravity uses the release supported by your T3 Code
 version. Enable each provider and sign in after installation.
 
-For a CLI installed by T3 Code, use **Update** in its setup section to check the
+For a CLI installed by T3 Code, use **Update** beside its version at the top of
+provider settings to check the
 official release channel and install the current version. Stop its sessions
 before updating, and disable its instances before removing the downloaded runtime.
 Credentials and thread history are kept when removing it.

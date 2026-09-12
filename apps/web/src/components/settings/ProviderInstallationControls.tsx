@@ -17,6 +17,7 @@ export function ProviderInstallationControls({
   onCancel,
   onRemove,
   tracksReleases = false,
+  compact = false,
 }: {
   readonly providerName: string;
   readonly installation: ProviderInstallState | null;
@@ -29,11 +30,98 @@ export function ProviderInstallationControls({
   readonly onCancel: (operationId: string) => void;
   readonly onRemove: () => void;
   readonly tracksReleases?: boolean;
+  readonly compact?: boolean;
 }) {
   const installActive =
     installation?.phase === "downloading" ||
     installation?.phase === "extracting" ||
     installation?.phase === "verifying";
+  const control = (
+    <div
+      className={
+        compact
+          ? "flex w-full min-w-0 flex-col gap-2"
+          : "flex w-full min-w-0 flex-col gap-2 sm:w-56 sm:text-right"
+      }
+    >
+      <p role="status" className="min-h-4 text-muted-foreground tabular-nums">
+        {installationStatusMessage}
+      </p>
+      <div className="h-1">
+        {installation?.phase === "downloading" &&
+        installation.totalBytes !== null &&
+        installation.totalBytes > 0 ? (
+          <progress
+            aria-label={`${providerName} download`}
+            className="block h-1 w-full accent-foreground"
+            value={installation.downloadedBytes}
+            max={installation.totalBytes}
+          />
+        ) : null}
+      </div>
+      {!installActive &&
+      installation?.message &&
+      installation.message !== installationStatusMessage ? (
+        <p className="text-muted-foreground [overflow-wrap:anywhere]">{installation.message}</p>
+      ) : null}
+      <div className="grid min-h-7 grid-cols-[1.75rem_minmax(0,1fr)] gap-2">
+        <div className="col-start-2 row-start-1 grid">
+          {installActive && installation.operationId ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => {
+                const operationId = installation.operationId;
+                if (!operationId) return;
+                onCancel(operationId);
+              }}
+            >
+              Cancel installation
+            </Button>
+          ) : !installActive && canInstall ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled || installation === null}
+              onClick={onInstall}
+            >
+              {installation?.installedVersion
+                ? tracksReleases ||
+                  (installation.version && installation.version !== installation.installedVersion)
+                  ? `Update ${providerName}`
+                  : `Reinstall ${providerName}`
+                : installation?.phase === "failed" || installation?.phase === "cancelled"
+                  ? "Retry installation"
+                  : installed
+                    ? "Install managed runtime"
+                    : `Install ${providerName}`}
+            </Button>
+          ) : null}
+        </div>
+        {installation?.canRemove && !installActive ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="col-start-1 row-start-1"
+                  aria-label="Remove downloaded runtime"
+                  disabled={disabled}
+                  onClick={onRemove}
+                />
+              }
+            >
+              <Trash2Icon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipPopup>Remove downloaded runtime</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </div>
+    </div>
+  );
+  if (compact) return control;
   return (
     <SettingsRow
       title="Runtime"
@@ -53,86 +141,7 @@ export function ProviderInstallationControls({
           ) : null}
         </div>
       }
-      control={
-        <div className="flex w-full min-w-0 flex-col gap-2 sm:w-56 sm:text-right">
-          <p role="status" className="min-h-4 text-muted-foreground tabular-nums">
-            {installationStatusMessage}
-          </p>
-          <div className="h-1">
-            {installation?.phase === "downloading" &&
-            installation.totalBytes !== null &&
-            installation.totalBytes > 0 ? (
-              <progress
-                aria-label={`${providerName} download`}
-                className="block h-1 w-full accent-foreground"
-                value={installation.downloadedBytes}
-                max={installation.totalBytes}
-              />
-            ) : null}
-          </div>
-          {!installActive &&
-          installation?.message &&
-          installation.message !== installationStatusMessage ? (
-            <p className="text-muted-foreground [overflow-wrap:anywhere]">{installation.message}</p>
-          ) : null}
-          <div className="grid min-h-7 grid-cols-[1.75rem_minmax(0,1fr)] gap-2">
-            <div className="col-start-2 row-start-1 grid">
-              {installActive && installation.operationId ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled}
-                  onClick={() => {
-                    const operationId = installation.operationId;
-                    if (!operationId) return;
-                    onCancel(operationId);
-                  }}
-                >
-                  Cancel installation
-                </Button>
-              ) : !installActive && canInstall ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled || installation === null}
-                  onClick={onInstall}
-                >
-                  {installation?.installedVersion
-                    ? tracksReleases ||
-                      (installation.version &&
-                        installation.version !== installation.installedVersion)
-                      ? `Update ${providerName}`
-                      : `Reinstall ${providerName}`
-                    : installation?.phase === "failed" || installation?.phase === "cancelled"
-                      ? "Retry installation"
-                      : installed
-                        ? "Install managed runtime"
-                        : `Install ${providerName}`}
-                </Button>
-              ) : null}
-            </div>
-            {installation?.canRemove && !installActive ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      className="col-start-1 row-start-1"
-                      aria-label="Remove downloaded runtime"
-                      disabled={disabled}
-                      onClick={onRemove}
-                    />
-                  }
-                >
-                  <Trash2Icon className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipPopup>Remove downloaded runtime</TooltipPopup>
-              </Tooltip>
-            ) : null}
-          </div>
-        </div>
-      }
+      control={control}
     />
   );
 }
