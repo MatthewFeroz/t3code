@@ -1,108 +1,121 @@
-import type { ServerProvider, ServerProviderUsageLimits } from "@t3tools/contracts";
-import { collectLimitSources, collectLimitsGroups } from "@t3tools/shared/usageLimits";
-
-export interface SubscriptionUsageRow {
-  readonly label: string;
-  readonly window: string;
-  // Omit unavailable values: iOS widget storage accepts property lists, not null.
-  readonly usedPercent?: number;
-  readonly resetLabel: string;
-  readonly expiresAt: number;
-  readonly checkedAt: number;
-}
+import {
+  collectLimitAccounts,
+  collectLimitPools,
+  type LimitAccount,
+} from "@t3tools/shared/usageLimits";
 
 export interface SubscriptionUsageSnapshot {
-  readonly rows: readonly SubscriptionUsageRow[];
-  readonly totalRows: number;
-  readonly deepLink: string;
+  url?: string;
+  checkedAt: number;
+  providers: Array<{
+    name: string;
+    detail: string;
+    windows: Array<{ label: string; remaining: number; reset: string }>;
+    expiresAt: number;
+    totalWindows: number;
+  }>;
 }
 
-type Presentations = Parameters<typeof collectLimitsGroups>[0] &
-  Parameters<typeof collectLimitSources>[0];
-const MAX_AGE = 30 * 60_000;
+// ponytail: snapshots expire after 15 minutes; background refresh needs a
+// separate authenticated transport while the mobile app is suspended.
+export const SNAPSHOT_MAX_AGE = 15 * 60_000;
+export const WIDGET_REFRESH_INTERVAL = 5 * 60_000;
 
-/** Only display data crosses into OS storage; credentials and emails stay in the app. */
-export function buildSubscriptionUsageSnapshot(
-  presentations: Presentations,
-  deepLink: string,
-): SubscriptionUsageSnapshot {
-  const rows: SubscriptionUsageRow[] = [];
-  const add = (label: string, limits: ServerProviderUsageLimits, sourceFailed = false) => {
-    const parsedCheckedAt = Date.parse(limits.checkedAt);
-    const checkedAt = Number.isFinite(parsedCheckedAt) ? parsedCheckedAt : 0;
-    if (limits.unavailable || sourceFailed || limits.windows.length === 0) {
-      rows.push({
-        label,
-        window:
-          limits.unavailable?.reason === "unsupported"
-            ? "No subscription limits"
-            : "Limits unavailable",
-        resetLabel: "Open app for details",
-        checkedAt,
-        expiresAt: 0,
-      });
-      return;
-    }
-    for (const window of limits.windows) {
-      const reset = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
-      rows.push({
-        label,
-        window: window.label,
-        usedPercent: Math.round(Math.max(0, Math.min(100, window.usedPercent))),
-        resetLabel: Number.isFinite(reset)
-          ? `Resets ${new Date(reset).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-          : "Reset time unavailable",
-        checkedAt,
-        expiresAt:
-          checkedAt === 0
-            ? 0
-            : Math.min(checkedAt + MAX_AGE, Number.isFinite(reset) ? reset : Infinity),
-      });
-    }
-  };
-  const driverLabel = (driver: string) => ({ codex: "Codex", claudeAgent: "Claude" })[driver];
-  // Home screens have no reveal control, so email-bearing names fall back to the driver.
-  const providerLimitsLabel = (provider: ServerProvider) => {
-    const displayName = provider.displayName?.trim();
-    return (
-      (displayName && !displayName.includes("@") ? displayName : undefined) ||
-      driverLabel(provider.driver) ||
-      String(provider.driver)
+/** Bound probes across config updates, reconnects, and foreground transitions. */
+export function createWidgetRefresher<Id>(refresh: (id: Id) => Promise<unknown>) {
+  const attempted = new Map<Id, number>();
+  const pending = new Set<Id>();
+  return async (connected: readonly Id[], now: number) => {
+    await Promise.allSettled(
+      connected.map(async (id) => {
+        if (pending.has(id) || now - (attempted.get(id) ?? -Infinity) < WIDGET_REFRESH_INTERVAL)
+          return;
+        attempted.set(id, now);
+        pending.add(id);
+        try {
+          await refresh(id);
+        } finally {
+          pending.delete(id);
+        }
+      }),
     );
   };
-  for (const group of collectLimitsGroups(presentations)) {
-    for (const provider of group.providers) {
-      if (!provider.usageLimits) continue;
-      const label = providerLimitsLabel(provider);
-      add(
-        group.environmentLabel ? `${group.environmentLabel} · ${label}` : label,
-        provider.usageLimits,
-      );
-    }
-  }
-  for (const source of collectLimitSources(presentations)) {
-    for (const [index, account] of source.accounts.entries()) {
-      add(
-        `${source.label} · ${driverLabel(account.driver) ?? account.driver} ${index + 1}`,
-        account.usageLimits,
-        Boolean(source.error),
-      );
-    }
-    if (source.error && source.accounts.length === 0) {
-      add(source.label, { checkedAt: source.checkedAt, windows: [] });
-    }
-  }
-  // Most constrained windows stay visible in the smallest families. Stable
-  // sorting preserves account order when two windows have the same quota.
-  rows.sort((a, b) => (b.usedPercent ?? -1) - (a.usedPercent ?? -1));
-  return { rows: rows.slice(0, 8), totalRows: rows.length, deepLink };
 }
 
-/** Schedule expiry without pretending that a reset supplies a fresh quota reading. */
+export function subscriptionUsageProps(
+  accounts: readonly LimitAccount[],
+  now: number,
+): SubscriptionUsageSnapshot {
+  const pools = collectLimitPools(accounts, now);
+  const checked = accounts
+    .filter((account) => account.driver === "codex" || account.driver === "claudeAgent")
+    .map((account) => Date.parse(account.limits.checkedAt));
+  return {
+    checkedAt: checked.length > 0 && checked.every(Number.isFinite) ? Math.min(...checked) : 0,
+    providers: (["codex", "claudeAgent"] as const).map((driver) => {
+      const pool = pools.find((candidate) => candidate.driver === driver);
+      const name = driver === "codex" ? "Codex" : "Claude";
+      if (!pool)
+        return { name, detail: "No limits available", windows: [], expiresAt: 0, totalWindows: 0 };
+      const checkedAt = Math.min(...pool.accounts.map((a) => Date.parse(a.limits.checkedAt)));
+      const expiresAt = Math.min(
+        checkedAt + SNAPSHOT_MAX_AGE,
+        ...pool.windows.flatMap((window) => window.resets.map((reset) => reset.at)),
+      );
+      const fresh = Number.isFinite(expiresAt) && expiresAt > now;
+      return {
+        name,
+        detail: !fresh
+          ? "Open T3 to refresh"
+          : pool.accounts.length > 1
+            ? `${pool.accounts.length} accounts · pooled`
+            : "Subscription remaining",
+        expiresAt: fresh ? expiresAt : 0,
+        totalWindows: fresh ? pool.windows.length : 0,
+        windows: fresh
+          ? [...pool.windows]
+              .sort((a, b) => a.remainingPercent - b.remainingPercent)
+              .slice(0, 6)
+              .map((window) => ({
+                label: window.label,
+                remaining: Math.round(window.remainingPercent),
+                reset: window.resets[0]
+                  ? `Next reset ${new Date(window.resets[0].at).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}`
+                  : "Reset time unavailable",
+              }))
+          : [],
+      };
+    }),
+  };
+}
+
+/** Deduplicate accounts before pooling, and only publish display data to the OS. */
+export function buildSubscriptionUsageSnapshot(
+  presentations: Parameters<typeof collectLimitAccounts>[0],
+  url: string,
+): SubscriptionUsageSnapshot {
+  // Freshness is evaluated at publication/render time, not on unrelated config emissions.
+  return { ...subscriptionUsageProps(collectLimitAccounts(presentations), 0), url };
+}
+
 export function subscriptionUsageTimeline(snapshot: SubscriptionUsageSnapshot, now: number) {
-  const dates = [
-    now,
-    ...new Set(snapshot.rows.map((row) => row.expiresAt).filter((at) => at > now)),
-  ];
-  return dates.sort((a, b) => a - b).map((at) => ({ date: new Date(at), props: snapshot }));
+  const deadlines = [...new Set(snapshot.providers.map((p) => p.expiresAt))]
+    .filter((deadline) => deadline > now)
+    .sort((a, b) => a - b);
+  return [now, ...deadlines].map((date) => ({
+    date: new Date(date),
+    props: {
+      ...snapshot,
+      providers: snapshot.providers.map((provider) =>
+        provider.windows.length > 0 && provider.expiresAt <= date
+          ? { ...provider, detail: "Open T3 to refresh", windows: [], totalWindows: 0 }
+          : provider,
+      ),
+    },
+  }));
 }

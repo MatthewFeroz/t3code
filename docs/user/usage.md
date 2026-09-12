@@ -79,18 +79,18 @@ settings section when you no longer need it.
 ## Add subscription usage to your home screen
 
 On iOS or Android, open T3 Code and connect your environments, then add the **Subscription usage**
-widget from your phone's widget gallery. On iOS, choose small, medium, or large. On Android,
-resize the widget to show more quota windows. Tap it to open **Usage → Limits**.
+widget from the widget gallery. iOS also offers an extra-large iPad widget and a rectangular
+Lock Screen widget. Resize the Android widget to show more limits. Tap to open **Usage → Limits**.
 
-The widget shows saved quota percentages, reset times, and when the displayed data was checked.
-The most-used quota windows appear first; a “more” count indicates additional windows in the app.
-Account email addresses are omitted. Providers without subscription usage data do not appear.
+The widget shows pooled remaining Codex and Claude quotas, reset times, and the snapshot time.
+The most constrained limits appear first. Account identities and credentials stay in the app.
+Missing or expired readings show a prompt instead of a guessed allowance.
 
-Data updates while the app receives information from connected environments. The widget does
-not fetch quotas while the app is closed. After thirty minutes or a reported reset time, it asks
-you to open the app to refresh; Android may show this notice at its next system widget update.
-Pull to refresh on **Limits** to request a new reading. A reset never makes the saved percentage
-zero automatically. Removing an environment in the app removes its data from the widget.
+Opening T3 checks connected environments at most once every five minutes and continues checking
+while the app is active. The widget does not fetch while the app is suspended. Readings expire
+after fifteen minutes or a reported reset; Android may delay that display update to conserve
+battery. Reopen the app while your environment is reachable to refresh. Removing an environment
+removes its data from the widget.
 
 If the widget is missing from the gallery, update the installed app and open it once. Widgets
 require an app build that includes them; iOS builds without widget extensions do not offer them.

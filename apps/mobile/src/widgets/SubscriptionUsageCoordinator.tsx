@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { environmentCatalog } from "../connection/catalog";
 import { environmentPresentations } from "../state/presentation";
 import { publishSubscriptionUsage } from "./publishSubscriptionUsage";
+import { useSubscriptionUsage } from "./useSubscriptionUsage";
 import { buildSubscriptionUsageSnapshot } from "./subscriptionUsageSnapshot";
 
 // Isolate quota changes from the much busier thread/config presentation stream.
@@ -18,6 +19,7 @@ const snapshotAtom = Atom.make((get) =>
 export function SubscriptionUsageCoordinator() {
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const snapshot = useAtomValue(snapshotAtom);
+  useSubscriptionUsage(catalog.isReady);
   useEffect(() => {
     if (!catalog.isReady) return;
     void Promise.resolve()

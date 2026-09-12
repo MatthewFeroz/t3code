@@ -104,6 +104,58 @@ node ../../scripts/mobile-native-static-check.ts
 
 The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin. Missing native tools are reported as warnings and skipped locally. CI installs the default toolset from `apps/mobile/Brewfile` before running the native checks.
 
+## Test the subscription widget
+
+The Subscription Usage widget requires a new native build; updating the store app or
+loading JavaScript into an older dev client does not install the widget extension.
+On a Mac with Xcode and an installed iOS Simulator runtime:
+
+1. Check out the widget changes on the Mac. Run `vp i`
+   from the repository root, then `cd apps/mobile` and `vp run ios:dev`.
+2. Use the normal simulator build. Do **not** set `T3CODE_IOS_PERSONAL_TEAM=1`:
+   that reduced-capability build intentionally omits widget extensions.
+3. Open T3 Code Dev and connect to your T3 server with its reachable address or
+   pairing link. `localhost` on the Mac does not address a server on another machine.
+4. Confirm both subscriptions appear under Usage → Limits, then return to the
+   simulator home screen. Long-press, choose Edit → Add Widget, find T3 Code Dev,
+   and add Subscription Usage. Check small, medium, and large sizes on iPhone;
+   also check extra-large on iPad and rectangular on the Lock Screen. Compact
+   widgets show each provider's tightest remaining limit.
+5. Compare the widget's remaining percentages with Limits and tap the widget to
+   verify it opens Limits. Check light and dark appearance and, if available,
+   multiple accounts and model-specific windows in the large widget.
+6. Leave T3 in the background for 15 minutes, or until a reported reset. The widget
+   should request a refresh rather than claim the allowance has refilled. Reopen
+   T3 while connected and confirm fresh percentages return. WidgetKit can delay
+   scheduled updates; the snapshot timestamp identifies the age of visible data.
+
+A physical iPhone build needs signing that supports the app group and widget
+extension. The simulator is the simplest first test. For Android, use
+`vp run android:dev` with a configured SDK/emulator and add the widget from the
+launcher. Android's inexact expiry update may be delayed by battery management.
+
+The app targets iOS 18 and newer. Before distributing, repeat the native checks
+on a small iPhone and a large iPhone, plus iPad in portrait and landscape. Include
+large accessibility text, VoiceOver, tinted widgets, missing subscriptions,
+disconnect/reconnect, and removing/re-adding the widget. Check the oldest supported
+OS and the current OS. JavaScript checks do not prove SwiftUI layout or signing.
+
+From the repository root, run the focused behavior checks:
+
+```bash
+./node_modules/.bin/vp test run apps/mobile/src/widgets/subscriptionUsage.test.ts apps/mobile/src/widgets/subscriptionUsageSnapshot.test.ts apps/mobile/src/widgets/useSubscriptionUsage.test.ts
+cd apps/mobile
+vp run test:widget-runtime
+```
+
+The runtime check executes Expo's serialized extension JavaScript across widget
+families, appearances, and fresh/stale states. Once these changes are on your
+GitHub fork's default branch, Actions → Mobile Widget Native Build can compile
+unsigned Release builds for device and simulator without local Mac access. It
+checks that the widget extension is embedded and both device families are enabled;
+it does not run a simulator or produce an installable signed device build. TestFlight
+distribution still needs your Apple signing credentials and a signed build.
+
 ## EAS Builds
 
 Preview and production variants use Expo fingerprinting so OTA updates only reach binaries with matching native dependencies, config plugins, and patches. CI uses the `preview:dev` profile to reuse a compatible native build when possible.

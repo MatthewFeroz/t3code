@@ -134,7 +134,13 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         name: "SubscriptionUsage",
         displayName: "Subscription usage",
         description: "Subscription quotas from your connected T3 Code environments.",
-        supportedFamilies: ["systemSmall", "systemMedium", "systemLarge"],
+        supportedFamilies: [
+          "systemSmall",
+          "systemMedium",
+          "systemLarge",
+          "systemExtraLarge",
+          "accessoryRectangular",
+        ],
       },
       {
         name: "AgentActivity",

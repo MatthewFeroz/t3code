@@ -1,91 +1,205 @@
-import { HStack, ProgressView, Spacer, Text, VStack } from "@expo/ui/swift-ui";
-import { font, foregroundStyle, lineLimit, tint, widgetURL } from "@expo/ui/swift-ui/modifiers";
+import { HStack, Spacer, Text, VStack } from "@expo/ui/swift-ui";
+import {
+  accessibilityElement,
+  accessibilityLabel,
+  font,
+  foregroundStyle,
+  frame,
+  layoutPriority,
+  lineLimit,
+  minimumScaleFactor,
+  widgetURL,
+} from "@expo/ui/swift-ui/modifiers";
 import { createWidget, type WidgetEnvironment } from "expo-widgets";
-import type { SubscriptionUsageSnapshot } from "./subscriptionUsageSnapshot";
 
-export function SubscriptionUsage(
-  props: SubscriptionUsageSnapshot,
-  environment: WidgetEnvironment,
-) {
+import type { SubscriptionUsageSnapshot as SubscriptionUsageProps } from "./subscriptionUsageSnapshot";
+
+function SubscriptionUsage(props: SubscriptionUsageProps, environment: WidgetEnvironment) {
   "widget";
-  const rows = props.rows ?? [];
-  const count =
-    environment.widgetFamily === "systemLarge"
-      ? 4
-      : environment.widgetFamily === "systemMedium"
-        ? 2
-        : 1;
-  const visible = rows.slice(0, count);
-  const oldest = Math.min(...visible.map((row) => row.checkedAt));
-  const now = environment.date.getTime();
-  const renderRow = (row: SubscriptionUsageSnapshot["rows"][number], index: number) => (
-    <VStack key={index} alignment="leading" spacing={3}>
-      <HStack>
-        <Text
+  // The extension evaluates this function without the app's module scope.
+  const family = environment.widgetFamily;
+  // Gallery snapshots can render an old timeline entry after it has expired.
+  const now = Math.max(environment.date.getTime(), Date.now());
+  const accessory = family === "accessoryRectangular";
+  const compact =
+    family === "systemSmall" || accessory || environment.levelOfDetail === "simplified";
+  const limit = family === "systemExtraLarge" ? 6 : family === "systemLarge" ? 4 : 2;
+  const monochrome =
+    environment.widgetRenderingMode !== "fullColor" || environment.isLuminanceReduced;
+  const providers = props.providers ?? [
+    { name: "Codex", detail: "Open T3 to connect", windows: [], expiresAt: 0 },
+    { name: "Claude", detail: "Open T3 to connect", windows: [], expiresAt: 0 },
+  ];
+  const columns = providers.map((provider) => {
+    const stale = provider.windows.length > 0 && now >= provider.expiresAt;
+    const windows = stale ? [] : provider.windows;
+    // Small/Lock Screen widgets name the tightest reported limit, rather than
+    // hiding an exhausted weekly or model-specific bucket behind a session value.
+    const tightest = windows.reduce<(typeof windows)[number] | undefined>(
+      (result, window) => (!result || window.remaining < result.remaining ? window : result),
+      undefined,
+    );
+    const shown = compact ? (tightest ? [tightest] : []) : windows.slice(0, limit);
+    const detail = stale ? "Open T3 to refresh" : provider.detail;
+    if (accessory) {
+      return (
+        <HStack
+          key={provider.name}
+          spacing={4}
           modifiers={[
-            font({ size: 12, weight: "semibold" }),
-            foregroundStyle("primary"),
-            lineLimit(1),
+            accessibilityElement("ignore"),
+            accessibilityLabel(
+              tightest
+                ? `${provider.name}, ${tightest.label}, ${tightest.remaining} percent remaining. ${tightest.reset}. ${provider.detail}.`
+                : `${provider.name}. ${detail}.`,
+            ),
           ]}
         >
-          {row.label}
-        </Text>
-        <Spacer />
-        <Text modifiers={[font({ size: 12 }), foregroundStyle("primary")]}>
-          {typeof row.usedPercent !== "number" ? "—" : `${row.usedPercent}% used`}
-        </Text>
-      </HStack>
-      <Text modifiers={[font({ size: 10 }), foregroundStyle("secondary"), lineLimit(1)]}>
-        {row.window}
-      </Text>
-      {typeof row.usedPercent === "number" ? (
-        <ProgressView
-          value={row.usedPercent / 100}
+          <Text
+            modifiers={[
+              font({ textStyle: "caption", weight: "semibold" }),
+              lineLimit(1),
+              minimumScaleFactor(0.75),
+              foregroundStyle("primary"),
+            ]}
+          >
+            {provider.name}
+            {tightest ? ` · ${tightest.label}` : ""}
+          </Text>
+          <Spacer />
+          <Text
+            modifiers={[
+              font({ textStyle: "caption", weight: "semibold" }),
+              lineLimit(1),
+              layoutPriority(1),
+              foregroundStyle("primary"),
+            ]}
+          >
+            {tightest ? `${tightest.remaining}% left` : "Open T3"}
+          </Text>
+        </HStack>
+      );
+    }
+    return (
+      <VStack
+        key={provider.name}
+        alignment="leading"
+        spacing={compact ? 2 : 4}
+        modifiers={[frame({ maxWidth: Infinity, alignment: "leading" })]}
+      >
+        <Text
           modifiers={[
-            tint(row.usedPercent >= 90 ? "#dc2626" : row.usedPercent >= 70 ? "#d97706" : "#0284c7"),
+            font({ textStyle: accessory ? "caption" : "headline", weight: "bold" }),
+            lineLimit(1),
+            minimumScaleFactor(0.75),
+            foregroundStyle("primary"),
           ]}
-        />
-      ) : null}
-      <Text modifiers={[font({ size: 10 }), foregroundStyle("secondary"), lineLimit(1)]}>
-        {row.expiresAt <= now ? "Open app to refresh" : row.resetLabel}
-      </Text>
-    </VStack>
-  );
-
+        >
+          {provider.name}
+        </Text>
+        {!compact || shown.length === 0 ? (
+          <Text
+            modifiers={[
+              font({ textStyle: "caption2" }),
+              foregroundStyle("secondary"),
+              lineLimit(compact ? 1 : 2),
+            ]}
+          >
+            {detail}
+          </Text>
+        ) : null}
+        {shown.map((window) => (
+          <VStack
+            key={window.label}
+            alignment="leading"
+            spacing={2}
+            modifiers={[
+              accessibilityElement("ignore"),
+              accessibilityLabel(
+                `${provider.name}, ${window.label}, ${window.remaining} percent remaining. ${window.reset}. ${provider.detail}.`,
+              ),
+            ]}
+          >
+            <HStack spacing={4}>
+              <Text
+                modifiers={[
+                  font({ textStyle: "caption" }),
+                  foregroundStyle("secondary"),
+                  lineLimit(1),
+                  minimumScaleFactor(0.75),
+                ]}
+              >
+                {window.label}
+              </Text>
+              <Spacer />
+              <Text
+                modifiers={[
+                  font({ textStyle: "caption", weight: "semibold" }),
+                  lineLimit(1),
+                  minimumScaleFactor(0.75),
+                  layoutPriority(1),
+                  foregroundStyle(
+                    window.remaining <= 10 && !monochrome
+                      ? environment.colorScheme === "light"
+                        ? "#dc2626"
+                        : "#fca5a5"
+                      : "primary",
+                  ),
+                ]}
+              >
+                {window.remaining}% left
+              </Text>
+            </HStack>
+            {!compact ? (
+              <Text
+                modifiers={[
+                  font({ textStyle: "caption2" }),
+                  foregroundStyle("secondary"),
+                  lineLimit(1),
+                  minimumScaleFactor(0.75),
+                ]}
+              >
+                {window.reset}
+              </Text>
+            ) : null}
+          </VStack>
+        ))}
+        {!compact && !stale && (provider.totalWindows ?? windows.length) > limit ? (
+          <Text modifiers={[font({ textStyle: "caption2" }), foregroundStyle("secondary")]}>
+            {(provider.totalWindows ?? windows.length) - limit} more in T3
+          </Text>
+        ) : null}
+      </VStack>
+    );
+  });
   return (
     <VStack
       alignment="leading"
-      spacing={8}
-      modifiers={[widgetURL(props.deepLink ?? "t3code://settings/usage?tab=limits")]}
+      spacing={accessory ? 2 : 6}
+      modifiers={[widgetURL(props.url ?? "t3code://settings/usage?tab=limits")]}
     >
-      <Text
-        modifiers={[font({ size: 14, weight: "bold" }), foregroundStyle("primary"), lineLimit(1)]}
-      >
-        {environment.widgetFamily === "systemSmall" ? "Usage limits" : "Subscription usage"}
-      </Text>
-      {visible.length === 0 ? (
-        <Text modifiers={[font({ size: 12 }), foregroundStyle("secondary")]}>
-          Open T3 Code and connect an environment to see limits.
-        </Text>
-      ) : null}
-      {environment.widgetFamily === "systemMedium" ? (
-        <HStack alignment="top" spacing={16}>
-          {visible.map(renderRow)}
-        </HStack>
+      {compact ? (
+        <VStack alignment="leading" spacing={accessory ? 4 : 8}>
+          {columns}
+        </VStack>
       ) : (
-        visible.map(renderRow)
+        <HStack alignment="top" spacing={16}>
+          {columns}
+        </HStack>
       )}
-      <Spacer minLength={0} />
-      <Text modifiers={[font({ size: 10 }), foregroundStyle("secondary"), lineLimit(1)]}>
-        {visible.length > 0
-          ? oldest > 0
-            ? `As of ${new Date(oldest).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-            : "Last checked unavailable"
-          : "Tap to open Usage"}
-      </Text>
-      {props.totalRows > visible.length ? (
-        <Text modifiers={[font({ size: 10 }), foregroundStyle("secondary"), lineLimit(1)]}>
-          {`+${props.totalRows - visible.length} more`}
+      {!accessory ? <Spacer /> : null}
+      {!accessory ? (
+        <Text
+          modifiers={[
+            font({ textStyle: "caption2" }),
+            foregroundStyle("secondary"),
+            lineLimit(1),
+            minimumScaleFactor(0.75),
+          ]}
+        >
+          {props.checkedAt
+            ? `As of ${new Date(props.checkedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}`
+            : "Tap to connect in T3"}
         </Text>
       ) : null}
     </VStack>

@@ -1,5 +1,6 @@
 package expo.modules.t3subscriptionwidget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -19,6 +20,15 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
     ids.forEach { update(context, manager, it) }
   }
 
+  override fun onReceive(context: Context, intent: Intent) {
+    super.onReceive(context, intent)
+    if (intent.action == EXPIRE) updateAll(context)
+  }
+
+  override fun onDisabled(context: Context) {
+    context.getSystemService(AlarmManager::class.java).cancel(expiryIntent(context))
+  }
+
   override fun onAppWidgetOptionsChanged(
     context: Context,
     manager: AppWidgetManager,
@@ -30,6 +40,14 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
 
   companion object {
     const val PREFERENCES = "t3_subscription_widget"
+    private const val EXPIRE = "expo.modules.t3subscriptionwidget.EXPIRE"
+
+    private fun expiryIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+      context,
+      0,
+      Intent(context, SubscriptionUsageWidget::class.java).setAction(EXPIRE),
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
     fun updateAll(context: Context) {
       val manager = AppWidgetManager.getInstance(context)
@@ -39,48 +57,63 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
 
     private fun update(context: Context, manager: AppWidgetManager, id: Int) {
       val saved = context.getSharedPreferences(PREFERENCES, 0).getString("snapshot", null)
-      val snapshot = try {
-        saved?.let { JSONObject(it) }
-      } catch (_: Exception) {
-        null
-      }
+      val snapshot = runCatching { JSONObject(saved.orEmpty()) }.getOrNull()
       val views = RemoteViews(context.packageName, R.layout.t3_subscription_widget)
       openAppIntent(context, id, snapshot)?.let {
         views.setOnClickPendingIntent(R.id.t3_widget_root, it)
       }
-      val rows = snapshot?.optJSONArray("rows")
-      if (rows != null && rows.length() > 0) {
+      val providers = snapshot?.optJSONArray("providers")
+      val now = System.currentTimeMillis()
+      var nextExpiry = Long.MAX_VALUE
+      var totalRows = 0
+      val groups = (0 until (providers?.length() ?: 0)).mapNotNull { index ->
+        val provider = providers?.optJSONObject(index) ?: return@mapNotNull null
+        val windows = provider.optJSONArray("windows")
+        val expiresAt = provider.optLong("expiresAt")
+        if (expiresAt > now && windows != null && windows.length() > 0) {
+          nextExpiry = minOf(nextExpiry, expiresAt)
+          totalRows += provider.optInt("totalWindows", windows.length())
+          (0 until windows.length()).map { provider to windows.optJSONObject(it) }
+        } else {
+          totalRows++
+          listOf(provider to null)
+        }
+      }
+      // Show each provider before filling spare space with its other windows.
+      val rows = (0 until (groups.maxOfOrNull { it.size } ?: 0)).flatMap { index ->
+        groups.mapNotNull { it.getOrNull(index) }
+      }
+      if (rows.isNotEmpty()) {
         views.removeAllViews(R.id.t3_widget_rows)
         val options = manager.getAppWidgetOptions(id)
         val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 180)
-        val count = ((height - 64) / 66).coerceIn(1, 8).coerceAtMost(rows.length())
-        var oldest = Long.MAX_VALUE
-        for (index in 0 until count) {
-          val row = rows.optJSONObject(index) ?: continue
-          val child = rowView(context, row)
-          oldest = minOf(oldest, row.optLong("checkedAt"))
-          views.addView(R.id.t3_widget_rows, child)
+        val count = ((height - 64) / 66).coerceIn(1, 12).coerceAtMost(rows.size)
+        for ((provider, window) in rows.take(count)) {
+          views.addView(R.id.t3_widget_rows, rowView(context, provider, window))
         }
-        val remaining = (snapshot?.optInt("totalRows", rows.length()) ?: rows.length()) - count
+        val remaining = totalRows - count
+        val checkedAt = snapshot?.optLong("checkedAt") ?: 0
         val formatted = DateFormat.getDateTimeInstance(
           DateFormat.SHORT,
           DateFormat.SHORT
-        ).format(Date(oldest))
+        ).format(Date(checkedAt))
         val more = if (remaining > 0) {
           context.getString(R.string.t3_subscription_widget_more, remaining)
         } else {
           ""
         }
-        views.setTextViewText(
-          R.id.t3_widget_footer,
-          (
-            if (oldest > 0) {
-              context.getString(R.string.t3_subscription_widget_as_of, formatted)
-            } else {
-              context.getString(R.string.t3_subscription_widget_unknown_check)
-            }
-            ) + more
-        )
+        val checked = if (checkedAt > 0) {
+          context.getString(R.string.t3_subscription_widget_as_of, formatted)
+        } else {
+          context.getString(R.string.t3_subscription_widget_unknown_check)
+        }
+        views.setTextViewText(R.id.t3_widget_footer, checked + more)
+      }
+      val alarms = context.getSystemService(AlarmManager::class.java)
+      alarms.cancel(expiryIntent(context))
+      // Inexact and non-wakeup: the timestamp remains visible if Android delays expiry.
+      if (nextExpiry != Long.MAX_VALUE) {
+        alarms.set(AlarmManager.RTC, nextExpiry, expiryIntent(context))
       }
       manager.updateAppWidget(id, views)
     }
@@ -90,7 +123,7 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
       val intent =
         context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return null
       intent.action = Intent.ACTION_VIEW
-      val deepLink = snapshot?.optString("deepLink")?.takeIf { it.isNotBlank() }
+      val deepLink = snapshot?.optString("url")?.takeIf { it.isNotBlank() }
         ?: "t3code://settings/usage?tab=limits"
       intent.data = Uri.parse(deepLink)
       intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -102,22 +135,28 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
       )
     }
 
-    private fun rowView(context: Context, row: JSONObject): RemoteViews {
+    private fun rowView(context: Context, provider: JSONObject, window: JSONObject?): RemoteViews {
       val child = RemoteViews(context.packageName, R.layout.t3_subscription_widget_row)
-      val used = if (row.isNull("usedPercent")) null else row.optInt("usedPercent").coerceIn(0, 100)
-      child.setTextViewText(R.id.t3_widget_label, row.optString("label"))
-      child.setTextViewText(R.id.t3_widget_window, row.optString("window"))
-      val percent = used?.let { context.getString(R.string.t3_subscription_widget_used, it) } ?: "—"
+      val remaining = window?.optInt("remaining")?.coerceIn(0, 100)
+      val detail = provider.optString("detail")
+      val label = provider.optString("name")
+      val windowLabel = window?.optString("label") ?: detail
+      child.setTextViewText(R.id.t3_widget_label, label)
+      child.setTextViewText(R.id.t3_widget_window, windowLabel)
+      val percent = remaining?.let {
+        context.getString(R.string.t3_subscription_widget_remaining, it)
+      } ?: "—"
       child.setTextViewText(R.id.t3_widget_percent, percent)
-      val visibility = if (used == null) View.GONE else View.VISIBLE
+      val visibility = if (remaining == null) View.GONE else View.VISIBLE
       child.setViewVisibility(R.id.t3_widget_progress, visibility)
-      if (used != null) child.setProgressBar(R.id.t3_widget_progress, 100, used, false)
-      val reset = if (row.optLong("expiresAt") <= System.currentTimeMillis()) {
-        context.getString(R.string.t3_subscription_widget_refresh)
-      } else {
-        row.optString("resetLabel")
-      }
+      if (remaining != null) child.setProgressBar(R.id.t3_widget_progress, 100, remaining, false)
+      val reset = window?.optString("reset")
+        ?: context.getString(R.string.t3_subscription_widget_refresh)
       child.setTextViewText(R.id.t3_widget_reset, reset)
+      child.setContentDescription(
+        R.id.t3_widget_row,
+        "$label. $windowLabel. $percent. $reset. $detail"
+      )
       return child
     }
   }

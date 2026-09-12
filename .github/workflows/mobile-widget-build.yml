@@ -1,0 +1,71 @@
+name: Mobile Widget Native Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    name: iOS Release (${{ matrix.sdk }})
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, iphonesimulator]
+    env:
+      APP_VARIANT: development
+      EXPO_NO_DOTENV: "1"
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@v6
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/mobile...
+      - name: Verify widget behavior
+        run: |
+          ./node_modules/.bin/vp test run apps/mobile/src/widgets/subscriptionUsage.test.ts apps/mobile/src/widgets/subscriptionUsageSnapshot.test.ts apps/mobile/src/widgets/useSubscriptionUsage.test.ts
+          cd apps/mobile
+          node scripts/verify-subscription-widget.mjs
+      - name: Generate iOS project and install pods
+        working-directory: apps/mobile
+        run: ./node_modules/.bin/expo prebuild --clean --platform ios
+      - name: Compile unsigned Release app and extensions
+        working-directory: apps/mobile
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/T3CodeDev.xcworkspace -scheme T3CodeDev \
+            -configuration Release -sdk '${{ matrix.sdk }}' \
+            -derivedDataPath "$RUNNER_TEMP/widget-build" \
+            -resultBundlePath "$RUNNER_TEMP/widget-build.xcresult" \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/widget-build.log"
+      - name: Check embedded widget and device families
+        env:
+          BUILD_SDK: ${{ matrix.sdk }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, plistlib
+          products = pathlib.Path(os.environ['RUNNER_TEMP']) / 'widget-build/Build/Products'
+          app = products / ('Release-' + os.environ['BUILD_SDK']) / 'T3CodeDev.app'
+          with (app / 'Info.plist').open('rb') as source:
+              assert set(plistlib.load(source)['UIDeviceFamily']) == {1, 2}
+          extensions = list((app / 'PlugIns').glob('*.appex/Info.plist'))
+          assert any(plistlib.loads(p.read_bytes()).get('NSExtension', {}).get(
+              'NSExtensionPointIdentifier') == 'com.apple.widgetkit-extension' for p in extensions)
+          PY
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: widget-build-${{ matrix.sdk }}
+          path: |
+            ${{ runner.temp }}/widget-build.log
+            ${{ runner.temp }}/widget-build.xcresult
+          if-no-files-found: warn
+          retention-days: 14
