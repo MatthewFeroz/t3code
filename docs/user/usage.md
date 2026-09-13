@@ -76,27 +76,8 @@ This connection supplies usage information; configure
 the provider separately to send agent requests through the hub. Remove the hub from the same
 settings section when you no longer need it.
 
-## Add subscription usage to your home screen
+## Subscription usage widget
 
-On iOS or Android, open T3 Code and connect your environments, then add the **Subscription usage**
-widget from the widget gallery. iOS also offers an extra-large iPad widget and a rectangular
-Lock Screen widget. Resize the Android widget to show more limits. Tap to open **Usage → Limits**.
-
-The widget shows pooled remaining Codex and Claude quotas, reset times, and the snapshot time.
-On iOS, Both keeps a session and weekly limit visible, then fills remaining space with the
-most constrained limits. Account identities and credentials stay in the app.
-Missing or expired readings show a prompt instead of a guessed allowance.
-
-On iOS, long-press a widget and choose **Edit Widget** to select **Both**, **Session**,
-or **Weekly** separately for Codex and Claude. Each widget keeps its own selections.
-Only limits reported by your subscription appear; the Lock Screen shows the tightest
-selected limit for each provider.
-
-Opening T3 checks connected environments at most once every five minutes and continues checking
-while the app is active. The widget does not fetch while the app is suspended. Readings expire
-after fifteen minutes or a reported reset; Android may delay that display update to conserve
-battery. Reopen the app while your environment is reachable to refresh. Removing an environment
-removes its data from the widget.
-
-If the widget is missing from the gallery, update the installed app and open it once. Widgets
-require an app build that includes them; iOS builds without widget extensions do not offer them.
+Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
+Claude quotas. Tap it to open **Usage → Limits**. On iOS, use **Edit Widget** to choose Session,
+Weekly, or both for each provider. Reopen T3 to refresh expired readings.

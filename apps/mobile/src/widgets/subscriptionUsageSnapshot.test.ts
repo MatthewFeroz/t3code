@@ -5,9 +5,11 @@ import {
   UsageLimitSourceId,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import {
   buildSubscriptionUsageSnapshot,
+  createWidgetRefresher,
+  WIDGET_REFRESH_INTERVAL,
   subscriptionUsageTimeline,
 } from "./subscriptionUsageSnapshot";
 
@@ -50,7 +52,10 @@ function presentations(providers: readonly ServerProvider[] = [provider()]) {
 
 describe("subscription widget snapshots", () => {
   it("uses provider data and its observation time without exposing account emails", () => {
-    const snapshot = buildSubscriptionUsageSnapshot(presentations(), deepLink);
+    const snapshot = buildSubscriptionUsageSnapshot(
+      presentations([provider({ displayName: "private@example.com" })]),
+      deepLink,
+    );
     expect(snapshot.checkedAt).toBe(now);
     expect(snapshot.providers[0]).toMatchObject({
       name: "Codex",
@@ -59,14 +64,6 @@ describe("subscription widget snapshots", () => {
     });
     expect(snapshot.url).toBe(deepLink);
     expect(JSON.stringify(snapshot)).not.toContain("private@example.com");
-  });
-  it("never shows an email-bearing instance name on the home screen", () => {
-    const snapshot = buildSubscriptionUsageSnapshot(
-      presentations([provider({ displayName: "work@example.com" })]),
-      deepLink,
-    );
-    expect(snapshot.providers[0]?.name).toBe("Codex");
-    expect(JSON.stringify(snapshot)).not.toContain("example.com");
   });
   it("clears data after removing environments and hides disabled providers", () => {
     expect(
@@ -171,6 +168,30 @@ describe("subscription widget snapshots", () => {
     expect(timeline[1]?.props.providers[0]?.windows).toEqual([]);
     expect(subscriptionUsageTimeline(snapshot, now + 60 * 60_000)).toHaveLength(1);
   });
+  it("expires providers independently without inventing a refill", () => {
+    const snapshot = buildSubscriptionUsageSnapshot(
+      presentations([
+        provider(),
+        provider({
+          instanceId: ProviderInstanceId.make("claude"),
+          driver: ProviderDriverKind.make("claudeAgent"),
+          usageLimits: { checkedAt, windows: [{ ...window, resetsAt: undefined }] },
+        }),
+      ]),
+      deepLink,
+    );
+    const timeline = subscriptionUsageTimeline(snapshot, now);
+    expect(timeline.map((entry) => entry.date.getTime())).toEqual([
+      now,
+      now + 10 * 60_000,
+      now + 15 * 60_000,
+    ]);
+    expect(timeline[1]?.props.providers[0]?.windows).toEqual([]);
+    expect(timeline[1]?.props.providers[1]?.windows[0]?.remaining).toBe(60);
+    expect(timeline[2]?.props.providers.every((provider) => provider.windows.length === 0)).toBe(
+      true,
+    );
+  });
   it("marks a malformed check time immediately stale without storing null", () => {
     const snapshot = buildSubscriptionUsageSnapshot(
       presentations([provider({ usageLimits: { ...limits, checkedAt: "invalid" } })]),
@@ -199,5 +220,38 @@ describe("subscription widget snapshots", () => {
     const snapshot = buildSubscriptionUsageSnapshot(input, deepLink);
     expect(snapshot.providers[0]?.detail).toBe("Subscription remaining");
     expect(snapshot.providers[0]?.windows[0]?.remaining).toBe(20);
+  });
+});
+
+describe("widget refresh probes", () => {
+  it("throttles each connected environment independently and retries failures", async () => {
+    const probe = vi
+      .fn<(id: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined);
+    const refresh = createWidgetRefresher(probe);
+    await refresh([], now);
+    expect(probe).not.toHaveBeenCalled();
+    await refresh(["first"], now);
+    await refresh(["first", "second"], now + 1);
+    expect(probe.mock.calls).toEqual([["first"], ["second"]]);
+    await refresh(["first"], now + WIDGET_REFRESH_INTERVAL);
+    expect(probe.mock.calls).toEqual([["first"], ["second"], ["first"]]);
+  });
+
+  it("does not overlap a slow probe even after the refresh interval", async () => {
+    let finish!: () => void;
+    const probe = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const refresh = createWidgetRefresher(probe);
+    const first = refresh(["one", "one"], now);
+    await refresh(["one"], now + WIDGET_REFRESH_INTERVAL);
+    expect(probe).toHaveBeenCalledTimes(1);
+    finish();
+    await first;
   });
 });

@@ -19,7 +19,7 @@ export interface SubscriptionUsageSnapshot {
 
 // Snapshots expire after 15 minutes; background refresh needs a
 // separate authenticated transport while the mobile app is suspended.
-export const SNAPSHOT_MAX_AGE = 15 * 60_000;
+const SNAPSHOT_MAX_AGE = 15 * 60_000;
 export const WIDGET_REFRESH_INTERVAL = 5 * 60_000;
 
 /** Bound probes across config updates, reconnects, and foreground transitions. */
@@ -43,7 +43,7 @@ export function createWidgetRefresher<Id>(refresh: (id: Id) => Promise<unknown>)
   };
 }
 
-export function subscriptionUsageProps(
+function subscriptionUsageProps(
   accounts: readonly LimitAccount[],
   now: number,
 ): SubscriptionUsageSnapshot {
