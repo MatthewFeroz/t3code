@@ -2,6 +2,7 @@ import {
   collectLimitAccounts,
   collectLimitPools,
   type LimitAccount,
+  type LimitPresentations,
 } from "@t3tools/shared/usageLimits";
 
 export interface SubscriptionUsageSnapshot {
@@ -16,7 +17,7 @@ export interface SubscriptionUsageSnapshot {
   }>;
 }
 
-// ponytail: snapshots expire after 15 minutes; background refresh needs a
+// Snapshots expire after 15 minutes; background refresh needs a
 // separate authenticated transport while the mobile app is suspended.
 export const SNAPSHOT_MAX_AGE = 15 * 60_000;
 export const WIDGET_REFRESH_INTERVAL = 5 * 60_000;
@@ -108,7 +109,7 @@ export function subscriptionUsageProps(
 
 /** Deduplicate accounts before pooling, and only publish display data to the OS. */
 export function buildSubscriptionUsageSnapshot(
-  presentations: Parameters<typeof collectLimitAccounts>[0],
+  presentations: LimitPresentations,
   url: string,
 ): SubscriptionUsageSnapshot {
   // Freshness is evaluated at publication/render time, not on unrelated config emissions.

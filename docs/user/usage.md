@@ -83,7 +83,8 @@ widget from the widget gallery. iOS also offers an extra-large iPad widget and a
 Lock Screen widget. Resize the Android widget to show more limits. Tap to open **Usage → Limits**.
 
 The widget shows pooled remaining Codex and Claude quotas, reset times, and the snapshot time.
-The most constrained limits appear first. Account identities and credentials stay in the app.
+On iOS, Both keeps a session and weekly limit visible, then fills remaining space with the
+most constrained limits. Account identities and credentials stay in the app.
 Missing or expired readings show a prompt instead of a guessed allowance.
 
 On iOS, long-press a widget and choose **Edit Widget** to select **Both**, **Session**,

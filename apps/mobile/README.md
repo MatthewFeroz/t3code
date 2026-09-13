@@ -106,8 +106,8 @@ The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin.
 
 ## Test the subscription widget
 
-The Subscription Usage widget requires a new native build; updating the store app or
-loading JavaScript into an older dev client does not install the widget extension.
+The Subscription Usage widget requires a native build containing the extension.
+An OTA JavaScript update or an older dev client cannot add it.
 On a Mac with Xcode and an installed iOS Simulator runtime:
 
 1. Check out the widget changes on the Mac. Run `vp i`

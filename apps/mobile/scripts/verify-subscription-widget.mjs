@@ -154,10 +154,17 @@ try {
               });
               const bars = [];
               const texts = inspect(node, [], bars);
-              NodeAssert.ok(
-                JSON.stringify(node).includes("settings/usage?tab=limits"),
-                "Every family must open Limits",
-              );
+              if (scenario.props.url) {
+                NodeAssert.ok(
+                  JSON.stringify(node).includes(scenario.props.url),
+                  "Every family must open Limits in the publishing app variant",
+                );
+              } else {
+                NodeAssert.ok(
+                  !JSON.stringify(node).includes("t3code://"),
+                  "Missing URLs must not redirect development widgets to the production app",
+                );
+              }
               NodeAssert.ok(
                 texts.some((text) => text.startsWith("Codex")) &&
                   texts.some((text) => text.startsWith("Claude")),
@@ -189,11 +196,18 @@ try {
                   [0.07, 0.07],
                   "Bars must show remaining, not used quota",
                 );
-              } else if (widgetFamily === "systemSmall") {
+              } else {
+                const perProvider =
+                  widgetFamily === "systemExtraLarge" ? 6 : widgetFamily === "systemLarge" ? 4 : 2;
                 NodeAssert.deepEqual(
-                  bars,
-                  [0.8, 0.07, 0.8, 0.07],
-                  "Small widgets must show session and weekly limits for both providers",
+                  bars.slice(0, 2),
+                  [0.8, 0.07],
+                  "Both must retain Codex session and weekly limits ahead of scoped windows",
+                );
+                NodeAssert.deepEqual(
+                  bars.slice(perProvider, perProvider + 2),
+                  [0.8, 0.07],
+                  "Both must retain Claude session and weekly limits ahead of scoped windows",
                 );
               }
               checks++;

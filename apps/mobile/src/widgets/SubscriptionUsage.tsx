@@ -64,7 +64,12 @@ function SubscriptionUsage(
           : []
         : family === "systemSmall" && compactWindows.length > 0
           ? compactWindows
-          : windows.slice(0, limit);
+          : period === "auto" && compactWindows.length > 0
+            ? [
+                ...compactWindows,
+                ...windows.filter((window) => !compactWindows.includes(window)),
+              ].slice(0, limit)
+            : windows.slice(0, limit);
     const detail = stale
       ? "Open T3 to refresh"
       : period !== "auto" && windows.length === 0 && provider.windows.length > 0
@@ -224,7 +229,7 @@ function SubscriptionUsage(
     <VStack
       alignment="leading"
       spacing={accessory ? 2 : 6}
-      modifiers={[widgetURL(props.url ?? "t3code://settings/usage?tab=limits")]}
+      modifiers={props.url ? [widgetURL(props.url)] : []}
     >
       {compact ? (
         <VStack alignment="leading" spacing={accessory ? 4 : 8}>
