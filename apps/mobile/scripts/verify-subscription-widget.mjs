@@ -77,16 +77,17 @@ try {
     "utf8",
   );
   const nativeTypes = new Set([...swift.matchAll(/case "([^"]+)":/g)].map((match) => match[1]));
-  function inspect(node, texts = []) {
+  function inspect(node, texts = [], bars = []) {
     if (node == null || node === false) return texts;
     if (Array.isArray(node)) {
-      for (const child of node) inspect(child, texts);
+      for (const child of node) inspect(child, texts, bars);
       return texts;
     }
     NodeAssert.equal(typeof node, "object", "Widget children must be native view nodes");
     NodeAssert.ok(nativeTypes.has(node.type), `Unsupported SwiftUI node: ${node.type}`);
     if (typeof node.props?.text === "string") texts.push(node.props.text);
-    inspect(node.props?.children, texts);
+    if (node.type === "ProgressView") bars.push(node.props.value);
+    inspect(node.props?.children, texts, bars);
     return texts;
   }
   const now = Date.parse("2026-09-12T12:00:00Z");
@@ -151,7 +152,8 @@ try {
                 isLuminanceReduced,
                 levelOfDetail,
               });
-              const texts = inspect(node);
+              const bars = [];
+              const texts = inspect(node, [], bars);
               NodeAssert.ok(
                 JSON.stringify(node).includes("settings/usage?tab=limits"),
                 "Every family must open Limits",
@@ -165,6 +167,7 @@ try {
                 "Account identities must not reach the widget",
               );
               if (scenario.empty) {
+                NodeAssert.equal(bars.length, 0, "Unknown/stale limits must not draw quota bars");
                 NodeAssert.ok(
                   !texts.some((text) => text.includes("more in T3")),
                   "Expired readings must not advertise hidden fresh limits",
@@ -174,7 +177,6 @@ try {
                   "No fabricated quota in unknown/stale states",
                 );
               } else if (
-                widgetFamily === "systemSmall" ||
                 widgetFamily === "accessoryRectangular" ||
                 levelOfDetail === "simplified"
               ) {
@@ -182,11 +184,37 @@ try {
                   texts.includes("7% left"),
                   "Compact layout must surface the tightest limit",
                 );
+                NodeAssert.deepEqual(
+                  bars,
+                  [0.07, 0.07],
+                  "Bars must show remaining, not used quota",
+                );
+              } else if (widgetFamily === "systemSmall") {
+                NodeAssert.deepEqual(
+                  bars,
+                  [0.8, 0.07, 0.8, 0.07],
+                  "Small widgets must show session and weekly limits for both providers",
+                );
               }
               checks++;
             }
           }
       }
+  }
+  for (const widgetFamily of ["systemSmall", "accessoryRectangular"]) {
+    NodeVM.runInContext(`Date.now = () => ${now}`, context);
+    const bars = [];
+    inspect(
+      context.__expoWidgetRender(timeline[0].props, {
+        timestamp: now,
+        widgetFamily,
+        configuration: { codexPeriod: "session", claudePeriod: "weekly" },
+      }),
+      [],
+      bars,
+    );
+    NodeAssert.deepEqual(bars, [0.8, 0.07], "Each provider must honor its own selected period");
+    checks++;
   }
   console.log(
     `Passed ${checks} serialized widget runtime scenarios. Native layout/signing still require Xcode.`,

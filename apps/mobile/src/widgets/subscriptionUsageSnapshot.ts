@@ -10,7 +10,7 @@ export interface SubscriptionUsageSnapshot {
   providers: Array<{
     name: string;
     detail: string;
-    windows: Array<{ label: string; remaining: number; reset: string }>;
+    windows: Array<{ kind?: string; label: string; remaining: number; reset: string }>;
     expiresAt: number;
     totalWindows: number;
   }>;
@@ -63,6 +63,20 @@ export function subscriptionUsageProps(
         ...pool.windows.flatMap((window) => window.resets.map((reset) => reset.at)),
       );
       const fresh = Number.isFinite(expiresAt) && expiresAt > now;
+      const sortedWindows = [...pool.windows].sort(
+        (a, b) => a.remainingPercent - b.remainingPercent,
+      );
+      // Keep a session and weekly limit when scoped limits fill the storage budget.
+      const selectedWindows = [
+        ...new Set([
+          sortedWindows.find((window) => window.kind === "session"),
+          sortedWindows.find((window) => window.kind === "weekly"),
+          ...sortedWindows,
+        ]),
+      ]
+        .filter((window) => window !== undefined)
+        .slice(0, 6)
+        .sort((a, b) => a.remainingPercent - b.remainingPercent);
       return {
         name,
         detail: !fresh
@@ -73,21 +87,19 @@ export function subscriptionUsageProps(
         expiresAt: fresh ? expiresAt : 0,
         totalWindows: fresh ? pool.windows.length : 0,
         windows: fresh
-          ? [...pool.windows]
-              .sort((a, b) => a.remainingPercent - b.remainingPercent)
-              .slice(0, 6)
-              .map((window) => ({
-                label: window.label,
-                remaining: Math.round(window.remainingPercent),
-                reset: window.resets[0]
-                  ? `Next reset ${new Date(window.resets[0].at).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}`
-                  : "Reset time unavailable",
-              }))
+          ? selectedWindows.map((window) => ({
+              kind: window.kind,
+              label: window.label,
+              remaining: Math.round(window.remainingPercent),
+              reset: window.resets[0]
+                ? `Next reset ${new Date(window.resets[0].at).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}`
+                : "Reset time unavailable",
+            }))
           : [],
       };
     }),

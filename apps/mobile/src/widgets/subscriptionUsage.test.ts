@@ -74,6 +74,7 @@ describe("subscription usage widget", () => {
     const windows = subscriptionUsageProps([scoped], now).providers[1]!.windows;
     expect(windows).toHaveLength(2);
     expect(windows.find((window) => window.label === "Weekly · Opus")).toEqual({
+      kind: "weekly",
       label: "Weekly · Opus",
       remaining: 60,
       reset: "Reset time unavailable",

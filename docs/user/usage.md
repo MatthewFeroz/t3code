@@ -86,6 +86,11 @@ The widget shows pooled remaining Codex and Claude quotas, reset times, and the 
 The most constrained limits appear first. Account identities and credentials stay in the app.
 Missing or expired readings show a prompt instead of a guessed allowance.
 
+On iOS, long-press a widget and choose **Edit Widget** to select **Both**, **Session**,
+or **Weekly** separately for Codex and Claude. Each widget keeps its own selections.
+Only limits reported by your subscription appear; the Lock Screen shows the tightest
+selected limit for each provider.
+
 Opening T3 checks connected environments at most once every five minutes and continues checking
 while the app is active. The widget does not fetch while the app is suspended. Readings expire
 after fifteen minutes or a reported reset; Android may delay that display update to conserve

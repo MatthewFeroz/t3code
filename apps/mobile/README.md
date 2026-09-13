@@ -120,7 +120,9 @@ On a Mac with Xcode and an installed iOS Simulator runtime:
    simulator home screen. Long-press, choose Edit → Add Widget, find T3 Code Dev,
    and add Subscription Usage. Check small, medium, and large sizes on iPhone;
    also check extra-large on iPad and rectangular on the Lock Screen. Compact
-   widgets show each provider's tightest remaining limit.
+   Home Screen widgets show Session and Weekly when reported; the Lock Screen
+   shows each provider's tightest selected limit. In Edit Widget, choose Both,
+   Session, or Weekly independently for Codex and Claude.
 5. Compare the widget's remaining percentages with Limits and tap the widget to
    verify it opens Limits. Check light and dark appearance and, if available,
    multiple accounts and model-specific windows in the large widget.
