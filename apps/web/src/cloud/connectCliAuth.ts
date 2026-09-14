@@ -8,7 +8,7 @@ import {
 import { clerkFrontendApiUrlFromPublishableKey } from "@t3tools/shared/relayAuth";
 
 import { configuredHostedAppUrl, isHostedStaticApp } from "../hostedPairing";
-import { hasCloudPublicConfig, resolveCloudPublicConfig, trimNonEmpty } from "./publicConfig";
+import { canUseCloudAuth, resolveCloudPublicConfig, trimNonEmpty } from "./publicConfig";
 
 const CONNECT_CLI_AUTH_STATE_STORAGE_KEY = "t3code-connect-cli-auth-state";
 
@@ -28,7 +28,7 @@ export function hasConnectCliAuthConfig(): boolean {
  * Clerk CLI OAuth client configured at build time.
  */
 export function connectCliAuthRoutesEnabled(): boolean {
-  return isHostedStaticApp() && hasCloudPublicConfig() && hasConnectCliAuthConfig();
+  return isHostedStaticApp() && canUseCloudAuth() && hasConnectCliAuthConfig();
 }
 
 /**
