@@ -1,6 +1,5 @@
 import type {
   AgentSkillDetail,
-  AgentSkillScope,
   AgentSkillSummary,
   EnvironmentId,
   ProjectId,
@@ -8,7 +7,6 @@ import type {
 import {
   BookOpenTextIcon,
   ArrowLeftIcon,
-  ExternalLinkIcon,
   RefreshCwIcon,
   SearchIcon,
   CloudIcon,
@@ -45,25 +43,17 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group"
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
-import { ToggleGroup, Toggle } from "../ui/toggle-group";
+import {
+  filterSkillCatalog,
+  skillInvocationLabel,
+  type SkillCatalogFilters,
+} from "@t3tools/client-runtime/providerSkills";
 
-type ScopeFilter = "all" | AgentSkillScope;
 type SkillProject = { readonly title: string; readonly workspaceRoot: string };
 
 const EMPTY_SKILLS: ReadonlyArray<AgentSkillSummary> = [];
 
-const skillKey = (skill: Pick<AgentSkillSummary, "scope" | "name">): string =>
-  `${skill.scope}:${skill.name}`;
-
-function sourceHref(value: string | null): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
+const skillKey = (skill: AgentSkillSummary): string => skill.id;
 
 const SKILL_MARKDOWN_COMPONENTS = {
   a: ({ children, ...props }) => (
@@ -80,7 +70,7 @@ function ScopeBadge({
   scope,
   project,
 }: {
-  scope: AgentSkillScope;
+  scope: string | undefined;
   project?: SkillProject | undefined;
 }) {
   return (
@@ -89,7 +79,9 @@ function ScopeBadge({
       variant="secondary"
       title={scope === "project" ? project?.workspaceRoot : undefined}
     >
-      {scope === "global" ? "Global" : project ? `Project · ${project.title}` : "Project"}
+      {scope === "project" && project
+        ? `Project · ${project.title}`
+        : (scope ?? "Unspecified scope")}
     </Badge>
   );
 }
@@ -107,6 +99,8 @@ function SkillListItem({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const first = skill.installations[0];
+  if (!first) return null;
   return (
     <button
       type="button"
@@ -120,12 +114,25 @@ function SkillListItem({
       )}
     >
       <span className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-medium text-foreground">{skill.name}</span>
-        <ScopeBadge scope={skill.scope} />
+        <span className="truncate text-sm font-medium text-foreground">
+          {first.displayName ?? first.name}
+        </span>
+        <ScopeBadge scope={first.scope} />
       </span>
-      {skill.description ? (
+      <span className="mt-1 block truncate text-xs">
+        {skill.installations
+          .map(
+            (entry) =>
+              `${entry.providerName} (${entry.instanceId}) · ${entry.enabled ? "Enabled" : "Disabled"}`,
+          )
+          .join(", ")}
+      </span>
+      <span className="mt-1 block truncate text-xs text-muted-foreground">
+        {skill.resolvedPath ?? first.path}
+      </span>
+      {first.description ? (
         <span className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-          {skill.description}
+          {first.description}
         </span>
       ) : null}
     </button>
@@ -139,57 +146,65 @@ function SkillDetailView({
   detail: AgentSkillDetail;
   project: SkillProject | undefined;
 }) {
-  const href = sourceHref(detail.sourceUrl);
+  const first = detail.installations[0];
+  if (!first) return null;
   return (
     <article className="min-w-0">
       <WorkspacePageContainer className="min-w-0">
         <header className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="min-w-0 break-words text-lg font-semibold">{detail.name}</h2>
-            <ScopeBadge scope={detail.scope} project={project} />
+            <h2 className="min-w-0 break-words text-lg font-semibold">
+              {first.displayName ?? first.name}
+            </h2>
+            <ScopeBadge scope={first.scope} project={project} />
           </div>
-          {detail.description ? (
-            <p className="text-sm leading-6 text-muted-foreground">{detail.description}</p>
+          {first.description ? (
+            <p className="text-sm leading-6 text-muted-foreground">{first.description}</p>
           ) : null}
-          <div className="flex flex-wrap items-center gap-1.5 pt-1" aria-label="Linked providers">
-            <span className="me-1 text-xs text-muted-foreground">Linked providers</span>
-            {detail.agents.length ? (
-              detail.agents.map((agent) => (
-                <Badge key={agent} variant="outline">
-                  {agent}
-                </Badge>
-              ))
-            ) : (
-              <span className="text-xs text-muted-foreground">None</span>
-            )}
-          </div>
         </header>
 
-        <details className="text-xs text-muted-foreground">
-          <summary className="w-fit cursor-pointer rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-            Installation details
-          </summary>
-          <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 leading-5">
-            <dt>Path</dt>
-            <dd className="break-all font-mono">{detail.path}</dd>
-            <dt>Source</dt>
-            <dd className="min-w-0 break-words">
-              {href ? (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-foreground underline underline-offset-4"
-                >
-                  {detail.source ?? detail.sourceUrl}
-                  <ExternalLinkIcon className="size-3 shrink-0" />
-                </a>
-              ) : (
-                (detail.source ?? "Local skill")
-              )}
-            </dd>
-          </dl>
-        </details>
+        <section className="space-y-3 text-xs" aria-label="Provider installations">
+          <p className="text-muted-foreground">
+            Invocation describes the provider policy. Disabled skills cannot run until enabled;
+            disabled provider instances cannot run skills.
+          </p>
+          {detail.installations.map((entry) => (
+            <div
+              key={JSON.stringify([entry.instanceId, entry.path, entry.name])}
+              className="space-y-2 rounded-md border border-border p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">
+                  {entry.providerName} ({entry.instanceId})
+                </span>
+                <Badge variant="outline">{entry.provider}</Badge>
+                <Badge variant="secondary">{entry.enabled ? "Enabled" : "Disabled"}</Badge>
+                {!entry.providerEnabled ? <Badge variant="outline">Provider disabled</Badge> : null}
+                <Badge variant="outline">{skillInvocationLabel(entry)}</Badge>
+                <ScopeBadge scope={entry.scope} project={project} />
+              </div>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2">
+                <dt>Skill name</dt>
+                <dd className="break-words">
+                  {entry.name}
+                  {entry.displayName ? ` · ${entry.displayName}` : ""}
+                </dd>
+                {entry.description ? (
+                  <>
+                    <dt>Description</dt>
+                    <dd>{entry.description}</dd>
+                  </>
+                ) : null}
+                <dt>Installation path</dt>
+                <dd className="break-all font-mono">{entry.path}</dd>
+                <dt>Resolved destination</dt>
+                <dd className="break-all font-mono">
+                  {detail.resolvedPath ?? "Unavailable — refresh after restoring the file"}
+                </dd>
+              </dl>
+            </div>
+          ))}
+        </section>
 
         <div className="border-t border-border pt-5">
           {detail.content ? (
@@ -294,7 +309,7 @@ export function SkillsPage() {
         modal={false}
         value={projectId ?? "global"}
         items={[
-          { value: "global", label: "Global skills only" },
+          { value: "global", label: "Environment skills" },
           ...environmentProjects.map((item) => ({ value: item.id, label: item.title })),
         ]}
         onValueChange={(value) => {
@@ -314,13 +329,13 @@ export function SkillsPage() {
           ) : (
             <GlobeIcon className="size-3 shrink-0" />
           )}
-          <SelectValue className="truncate">{project?.title ?? "Global skills only"}</SelectValue>
+          <SelectValue className="truncate">{project?.title ?? "Environment skills"}</SelectValue>
         </SelectTrigger>
         <SelectPopup>
           <SelectItem value="global">
             <span className="inline-flex items-center gap-2">
               <GlobeIcon className="size-3.5 shrink-0" />
-              Global skills only
+              Environment skills
             </span>
           </SelectItem>
           {environmentProjects.map((item) => (
@@ -377,26 +392,49 @@ function SkillsPageContent({
     [prepared, projectId],
   );
   const catalog = useEnvironmentQuery(catalogAtom);
-  const skills = catalog.data ?? EMPTY_SKILLS;
+  const skills = catalog.data?.skills ?? EMPTY_SKILLS;
   const catalogError =
     prepared === null ? "Connect to this environment to inspect its skills." : catalog.error;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<ScopeFilter>("all");
-  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
-
+  const [filters, setFilters] = useState<Omit<SkillCatalogFilters, "query">>({
+    instanceId: "all",
+    status: "all",
+    invocation: "all",
+    scope: "all",
+  });
+  const deferredQuery = useDeferredValue(query);
   const filteredSkills = useMemo(
+    () => filterSkillCatalog(skills, { ...filters, query: deferredQuery }),
+    [skills, filters, deferredQuery],
+  );
+  const providerOptions = useMemo(
+    () => [
+      ...new Map(
+        skills.flatMap((skill) =>
+          skill.installations.map(
+            (entry) =>
+              [
+                entry.instanceId,
+                { value: entry.instanceId, label: `${entry.providerName} (${entry.instanceId})` },
+              ] as const,
+          ),
+        ),
+      ).values(),
+    ],
+    [skills],
+  );
+  const scopeOptions = useMemo(
     () =>
-      skills.filter((skill) => {
-        if (scope !== "all" && skill.scope !== scope) return false;
-        if (!deferredQuery) return true;
-        return [skill.name, skill.description, skill.path, skill.source ?? "", ...skill.agents]
-          .join(" ")
-          .toLowerCase()
-          .includes(deferredQuery);
-      }),
-    [skills, deferredQuery, scope],
+      [
+        ...new Set(
+          skills.flatMap((skill) =>
+            skill.installations.map((entry) => entry.scope ?? "unspecified"),
+          ),
+        ),
+      ].map((value) => ({ value, label: value })),
+    [skills],
   );
 
   const selected = useMemo(
@@ -442,6 +480,15 @@ function SkillsPageContent({
         </WorkspacePageHeader>
 
         {selectors}
+        {catalog.data?.issues.map((issue) => (
+          <p
+            key={issue.instanceId}
+            role="status"
+            className="px-5 py-2 text-sm text-muted-foreground"
+          >
+            {issue.providerName} ({issue.instanceId}): {issue.message}
+          </p>
+        ))}
         {catalogError !== null ? (
           <p role="alert" className="px-5 py-3 text-sm text-destructive-foreground">
             {catalogError}
@@ -468,24 +515,52 @@ function SkillsPageContent({
                   aria-label="Search skills"
                 />
               </InputGroup>
-              {projectId !== null ? (
-                <ToggleGroup
-                  variant="segmented"
-                  className="w-full"
-                  value={[scope]}
-                  onValueChange={(values) => {
-                    const next = values[0];
-                    if (next === "all" || next === "project" || next === "global") setScope(next);
-                  }}
-                  aria-label="Filter skill scope"
-                >
-                  {(["all", "project", "global"] as const).map((value) => (
-                    <Toggle key={value} value={value} className="flex-1 capitalize">
-                      {value}
-                    </Toggle>
-                  ))}
-                </ToggleGroup>
-              ) : null}
+              <SkillFilter
+                label="Provider instance"
+                value={filters.instanceId}
+                options={[{ value: "all", label: "All provider instances" }, ...providerOptions]}
+                onChange={(instanceId) => setFilters({ ...filters, instanceId })}
+              />
+              <SkillFilter
+                label="Enabled status"
+                value={filters.status}
+                options={[
+                  { value: "all", label: "All statuses" },
+                  { value: "enabled", label: "Enabled" },
+                  { value: "disabled", label: "Disabled" },
+                ]}
+                onChange={(status) => {
+                  if (status === "all" || status === "enabled" || status === "disabled")
+                    setFilters({ ...filters, status });
+                }}
+              />
+              <SkillFilter
+                label="Invocation"
+                value={filters.invocation}
+                options={[
+                  { value: "all", label: "Any invocation policy" },
+                  { value: "user", label: "User can invoke" },
+                  { value: "agent", label: "Agent can invoke" },
+                  { value: "both", label: "User and agent" },
+                  { value: "neither", label: "Neither" },
+                ]}
+                onChange={(invocation) => {
+                  if (
+                    invocation === "all" ||
+                    invocation === "user" ||
+                    invocation === "agent" ||
+                    invocation === "both" ||
+                    invocation === "neither"
+                  )
+                    setFilters({ ...filters, invocation });
+                }}
+              />
+              <SkillFilter
+                label="Skill scope"
+                value={filters.scope}
+                options={[{ value: "all", label: "All scopes" }, ...scopeOptions]}
+                onChange={(scope) => setFilters({ ...filters, scope })}
+              />
             </div>
 
             <ScrollArea className="min-h-0 flex-1" scrollFade>
@@ -516,16 +591,14 @@ function SkillsPageContent({
                         ? "Could not load skills"
                         : skills.length === 0
                           ? "No skills installed"
-                          : scope !== "all" && !query
-                            ? `No ${scope} skills`
-                            : "No matches"}
+                          : "No matches"}
                     </EmptyTitle>
                     <EmptyDescription>
                       {catalogError !== null
                         ? "Refresh to try again."
                         : skills.length === 0
                           ? "Install skills on this environment, then refresh."
-                          : "Try another search or scope."}
+                          : "Try another search or filter."}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -564,5 +637,39 @@ function SkillsPageContent({
         </div>
       </div>
     </SidebarInset>
+  );
+}
+
+function SkillFilter({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Select
+      modal={false}
+      value={value}
+      items={options}
+      onValueChange={(next) => {
+        if (next !== null) onChange(next);
+      }}
+    >
+      <SelectTrigger size="sm" aria-label={label} className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectPopup>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectPopup>
+    </Select>
   );
 }

@@ -31,6 +31,7 @@ import {
   PullRequestDiffLoader,
   pullRequestDiffLoaderLayer,
 } from "./pullRequestDiffHttp.ts";
+import { fetchEnvironmentSkill, fetchEnvironmentSkills } from "./skills.ts";
 import { fetchEnvironmentSessionState } from "./session.ts";
 import { fetchEnvironmentShellSnapshot } from "./shellSnapshotHttp.ts";
 import { fetchEnvironmentThreadSnapshot } from "./threadSnapshotHttp.ts";
@@ -180,6 +181,39 @@ const LOADERS: ReadonlyArray<{
   >;
 }> = [
   {
+    name: "skills catalog",
+    method: "GET",
+    path: "/api/skills",
+    response: { skills: [], issues: [] },
+    load: (input) =>
+      fetchEnvironmentSkills(input.prepared, {}).pipe(
+        Effect.provideService(ManagedRelayDpopSigner, Option.getOrThrow(input.signer)),
+        Effect.provideService(
+          RemoteEnvironmentAuthorization,
+          Option.getOrThrow(input.remoteAuthorization),
+        ),
+      ),
+  },
+  {
+    name: "skill instructions",
+    method: "GET",
+    path: "/api/skills/file-id",
+    response: {
+      id: "file-id",
+      resolvedPath: "/skills/SKILL.md",
+      installations: [],
+      content: "Instructions",
+    },
+    load: (input) =>
+      fetchEnvironmentSkill(input.prepared, {}, { id: "file-id" }).pipe(
+        Effect.provideService(ManagedRelayDpopSigner, Option.getOrThrow(input.signer)),
+        Effect.provideService(
+          RemoteEnvironmentAuthorization,
+          Option.getOrThrow(input.remoteAuthorization),
+        ),
+      ),
+  },
+  {
     name: "PR diff",
     method: "POST",
     path: "/api/pull-requests/diff",
@@ -215,6 +249,17 @@ const LOADERS: ReadonlyArray<{
 ];
 
 describe("authenticated environment HTTP requests", () => {
+  it.effect.each(LOADERS)("rejects an invalid $name response", (loader) =>
+    Effect.gen(function* () {
+      const harness = makeHarness(() => Response.json({}));
+      const result = yield* loader
+        .load(harness.input)
+        .pipe(Effect.provide(harness.httpLayer), Effect.asVoid, Effect.flip);
+      expect(result._tag).toBe("RemoteEnvironmentAuthInvalidJsonError");
+      expect(harness.calls).toHaveLength(1);
+    }),
+  );
+
   it.effect.each(LOADERS)("uses current relay authorization and endpoint for $name", (loader) =>
     Effect.gen(function* () {
       const harness = makeHarness(() => Response.json(loader.response));

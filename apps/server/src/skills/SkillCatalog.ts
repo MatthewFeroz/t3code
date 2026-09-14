@@ -1,52 +1,34 @@
 // @effect-diagnostics nodeBuiltinImport:off
-// Node FileHandle keeps bounded reads and descriptor cleanup in one try/finally.
-// The CLI also needs a private npm prefix independent of the selected project.
+// FileHandle bounds instruction reads even when a file grows while it is open.
 import * as NodeFSP from "node:fs/promises";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
 
-import type { AgentSkillDetail, AgentSkillScope, AgentSkillSummary } from "@t3tools/contracts";
+import type {
+  AgentSkillCatalog,
+  AgentSkillDetail,
+  AgentSkillInstallation,
+  AgentSkillSummary,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Cache from "effect/Cache";
-import * as Data from "effect/Data";
 import * as Semaphore from "effect/Semaphore";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import { parse as parseYaml } from "yaml";
 
-import * as ProcessRunner from "../processRunner.ts";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 
-const MAX_CATALOG_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_SKILL_CONTENT_BYTES = 512 * 1024;
-
-const CliSkillEntry = Schema.Struct({
-  name: Schema.String,
-  path: Schema.String,
-  scope: Schema.Literals(["project", "global"]),
-  agents: Schema.Array(Schema.String),
-  source: Schema.NullOr(Schema.String),
-  sourceUrl: Schema.NullOr(Schema.String),
-  sourceType: Schema.NullOr(Schema.String),
-});
-
-const decodeCliSkills = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Array(CliSkillEntry)),
-);
 
 export class SkillDiscoveryError extends Schema.TaggedError<SkillDiscoveryError>()(
   "SkillDiscoveryError",
   {
-    stage: Schema.Literals(["prepare", "execute", "output", "decode", "busy"]),
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return this.stage === "busy"
-      ? "Skill discovery is busy. Try refreshing again shortly."
-      : `Could not discover skills (${this.stage})`;
+    return "Skill discovery is busy. Try refreshing again shortly.";
   }
 }
 
@@ -59,42 +41,11 @@ export class SkillReadError extends Schema.TaggedError<SkillReadError>()("SkillR
   }
 }
 
-type SkillCatalogError = SkillDiscoveryError | SkillReadError;
-
-class DiscoveryKey extends Data.Class<{
-  readonly scope: AgentSkillScope;
-  readonly cwd: string | undefined;
-}> {}
-
-function frontmatterBlock(content: string): RegExpExecArray | null {
-  return /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
-}
-
-function skillDescriptionFromMarkdown(content: string): string {
-  const match = frontmatterBlock(content);
-  if (!match?.[1]) return "";
-  try {
-    const frontmatter: unknown = parseYaml(match[1]);
-    if (typeof frontmatter !== "object" || frontmatter === null) return "";
-    const description = Reflect.get(frontmatter, "description");
-    return typeof description === "string" ? description.trim() : "";
-  } catch {
-    return "";
-  }
-}
-
-function skillBodyFromMarkdown(content: string): string {
-  const match = frontmatterBlock(content);
-  return (match ? content.slice(match[0].length) : content).trim();
-}
-
-const readSkillMarkdown = (skillPath: string) =>
+const readSkillMarkdown = (filePath: string) =>
   Effect.tryPromise({
     try: async () => {
-      const filePath = NodePath.join(skillPath, "SKILL.md");
       const file = await NodeFSP.open(filePath, "r");
       try {
-        // Read one extra byte to detect growth without allocating based on file size.
         const buffer = Buffer.alloc(MAX_SKILL_CONTENT_BYTES + 1);
         let length = 0;
         while (length < buffer.length) {
@@ -102,145 +53,138 @@ const readSkillMarkdown = (skillPath: string) =>
           if (bytesRead === 0) break;
           length += bytesRead;
         }
-        if (length > MAX_SKILL_CONTENT_BYTES) {
-          throw new Error(`SKILL.md exceeds ${MAX_SKILL_CONTENT_BYTES} bytes`);
-        }
-        return buffer.toString("utf8", 0, length);
+        if (length > MAX_SKILL_CONTENT_BYTES) throw new Error("SKILL.md exceeds 512 KiB");
+        return buffer
+          .toString("utf8", 0, length)
+          .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
+          .trim();
       } finally {
         await file.close();
       }
     },
-    catch: (cause) => new SkillReadError({ path: NodePath.join(skillPath, "SKILL.md"), cause }),
+    catch: (cause) => new SkillReadError({ path: filePath, cause }),
   });
 
 export class SkillCatalog extends Context.Service<
   SkillCatalog,
   {
-    readonly list: (
-      cwd?: string,
-    ) => Effect.Effect<ReadonlyArray<AgentSkillSummary>, SkillCatalogError>;
+    readonly list: (cwd?: string) => Effect.Effect<AgentSkillCatalog, SkillDiscoveryError>;
     readonly detail: (
-      scope: AgentSkillScope,
-      name: string,
+      id: string,
       cwd?: string,
-    ) => Effect.Effect<Option.Option<AgentSkillDetail>, SkillCatalogError>;
+    ) => Effect.Effect<Option.Option<AgentSkillDetail>, SkillDiscoveryError | SkillReadError>;
   }
 >()("t3/skills/SkillCatalog") {}
 
 export const make = Effect.fn("SkillCatalog.make")(function* () {
-  const runner = yield* ProcessRunner.ProcessRunner;
+  const registry = yield* ProviderInstanceRegistry;
   const catalogCache = yield* Ref.make<
-    Option.Option<{
-      readonly cwd: string | undefined;
-      readonly skills: ReadonlyArray<AgentSkillSummary>;
-    }>
-  >(Option.none());
+    { cwd: string | undefined; catalog: AgentSkillCatalog } | undefined
+  >(undefined);
+  const slots = yield* Semaphore.make(2);
 
-  const discoverUncached = Effect.fn("SkillCatalog.discoverScope")(function* (
-    scope: AgentSkillScope,
-    cwd?: string,
-  ) {
-    // npm exec resolves packages and bins from its prefix. An empty prefix prevents
-    // a project's installed skills package or executable from shadowing the pinned CLI.
-    const prefix = yield* Effect.acquireRelease(
-      Effect.tryPromise({
-        try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-skills-cli-")),
-        catch: (cause) => new SkillDiscoveryError({ stage: "prepare", cause }),
-      }),
-      (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
-    );
-    const result = yield* runner
-      .run({
-        command: "npx",
-        cwd,
-        args: [
-          "--yes",
-          "--ignore-scripts",
-          "--prefix",
-          prefix,
-          "--package=skills@1.5.23",
-          "--",
-          "skills",
-          "list",
-          ...(scope === "global" ? ["--global"] : []),
-          "--json",
-        ],
-        timeout: "30 seconds",
-        maxOutputBytes: MAX_CATALOG_OUTPUT_BYTES,
-        env: { DISABLE_TELEMETRY: "1", DO_NOT_TRACK: "1" },
-      })
-      .pipe(Effect.mapError((cause) => new SkillDiscoveryError({ stage: "execute", cause })));
-
-    if (result.code !== 0 || result.stdoutTruncated || result.stdoutInvalidUtf8) {
-      return yield* new SkillDiscoveryError({ stage: "output", cause: result.stderr });
+  const discover = Effect.fn("SkillCatalog.discover")(function* (cwd: string | undefined) {
+    const instances = yield* registry.listInstances;
+    const installations: AgentSkillInstallation[] = [];
+    const issues: Array<AgentSkillCatalog["issues"][number]> = [];
+    // Two catalog requests at most, each probing providers sequentially. The
+    // driver owns discovery and its per-instance configuration, never the composer.
+    for (const instance of instances) {
+      const cached = yield* instance.snapshot.getSnapshot;
+      const snapshot = yield* (
+        !instance.enabled || !cached.installed
+          ? Effect.succeed(cached)
+          : cwd !== undefined && instance.snapshotForCwd
+            ? instance.snapshotForCwd(cwd)
+            : instance.snapshot.refresh
+      ).pipe(
+        Effect.map(Option.some),
+        Effect.catch((cause) => {
+          issues.push({
+            instanceId: instance.instanceId,
+            providerName: instance.displayName ?? instance.driverKind,
+            message: cause.message,
+          });
+          return Effect.succeed(Option.none());
+        }),
+      );
+      if (Option.isNone(snapshot)) continue;
+      if (snapshot.value.status === "error") {
+        issues.push({
+          instanceId: instance.instanceId,
+          providerName: instance.displayName ?? instance.driverKind,
+          message: snapshot.value.message ?? "Provider discovery failed.",
+        });
+      }
+      for (const skill of snapshot.value.skills) {
+        installations.push({
+          ...skill,
+          instanceId: instance.instanceId,
+          provider: instance.driverKind,
+          providerName: instance.displayName ?? instance.driverKind,
+          providerEnabled: instance.enabled,
+        });
+      }
     }
-
-    const entries = yield* decodeCliSkills(result.stdout).pipe(
-      Effect.mapError((cause) => new SkillDiscoveryError({ stage: "decode", cause })),
-    );
-
-    return yield* Effect.forEach(
-      entries.filter((entry) => entry.scope === scope),
-      (entry) =>
-        readSkillMarkdown(entry.path).pipe(
-          Effect.map((content): AgentSkillSummary => ({
-            ...entry,
-            description: skillDescriptionFromMarkdown(content),
-          })),
-          // A skill can disappear between CLI discovery and this read. Keep it
-          // visible and let the detail request report the failed read if selected.
-          Effect.orElseSucceed((): AgentSkillSummary => ({ ...entry, description: "" })),
-        ),
+    const files = yield* Effect.forEach(
+      installations,
+      (installation) =>
+        Effect.promise(async () => ({
+          installation,
+          resolvedPath: await NodeFSP.realpath(installation.path).catch(() => null),
+        })),
       { concurrency: 8 },
     );
-  }, Effect.scoped);
+    const groups = new Map<
+      string,
+      { id: string; resolvedPath: string | null; installations: AgentSkillInstallation[] }
+    >();
+    for (const { installation, resolvedPath } of files) {
+      // Never merge unresolved paths across providers: they may no longer refer
+      // to the same file. Names are metadata, not file identity.
+      const key =
+        resolvedPath === null
+          ? `installation:${installation.instanceId}:${installation.path}`
+          : `file:${resolvedPath}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          id: NodeCrypto.createHash("sha256").update(key).digest("hex"),
+          resolvedPath,
+          installations: [],
+        };
+        groups.set(key, group);
+      }
+      group.installations.push(installation);
+    }
+    return { skills: [...groups.values()], issues } satisfies AgentSkillCatalog;
+  });
 
-  const discoverySlots = yield* Semaphore.make(2);
-  // Only in-progress requests are shared: Refresh must see filesystem changes.
-  // Refuse excess distinct work before allocating prefixes or spawning processes.
-  const discoveries = yield* Cache.makeWith(
-    (key: DiscoveryKey) =>
-      discoverySlots
-        .withPermitsIfAvailable(1)(discoverUncached(key.scope, key.cwd))
-        .pipe(
-          Effect.flatMap(
-            Option.match({
-              onNone: () => new SkillDiscoveryError({ stage: "busy", cause: undefined }),
-              onSome: Effect.succeed,
-            }),
-          ),
-        ),
-    { capacity: 32, timeToLive: () => 0 },
-  );
-  const discoverScope = (scope: AgentSkillScope, cwd?: string) =>
-    Cache.get(discoveries, new DiscoveryKey({ scope, cwd }));
-
+  // Keep cancellation attached to the request. Provider snapshots own their
+  // refresh sharing; the catalog only bounds simultaneous discovery requests.
   const list = Effect.fn("SkillCatalog.list")(function* (cwd?: string) {
-    const scopes = cwd === undefined ? (["global"] as const) : (["project", "global"] as const);
-    const skills = (yield* Effect.forEach(scopes, (scope) => discoverScope(scope, cwd), {
-      concurrency: "unbounded",
-    })).flat();
-    yield* Ref.set(catalogCache, Option.some({ cwd, skills }));
-    return skills;
+    const result = yield* slots.withPermitsIfAvailable(1)(discover(cwd));
+    if (Option.isNone(result)) return yield* new SkillDiscoveryError({ cause: undefined });
+    const catalog = result.value;
+    yield* Ref.set(catalogCache, { cwd, catalog });
+    return catalog;
   });
-
-  const detail = Effect.fn("SkillCatalog.detail")(function* (
-    scope: AgentSkillScope,
-    name: string,
-    cwd?: string,
-  ) {
-    if (scope === "project" && cwd === undefined) return Option.none<AgentSkillDetail>();
+  const detail = Effect.fn("SkillCatalog.detail")(function* (id: string, cwd?: string) {
     const cached = yield* Ref.get(catalogCache);
-    const skills =
-      Option.isSome(cached) && cached.value.cwd === cwd
-        ? cached.value.skills.filter((skill) => skill.scope === scope)
-        : yield* discoverScope(scope, cwd);
-    const summary = skills.find((skill) => skill.name === name);
-    if (!summary) return Option.none<AgentSkillDetail>();
-    const markdown = yield* readSkillMarkdown(summary.path);
-    return Option.some({ ...summary, content: skillBodyFromMarkdown(markdown) });
+    const catalog = cached?.cwd === cwd && cached !== undefined ? cached.catalog : yield* list(cwd);
+    const skill: AgentSkillSummary | undefined = catalog.skills.find((entry) => entry.id === id);
+    if (!skill) return Option.none<AgentSkillDetail>();
+    // Read the resolved identity, so retargeting a symlink cannot put a different
+    // file's instructions beneath the cached group's provider badges.
+    const filePath = skill.resolvedPath;
+    if (filePath === null)
+      return yield* new SkillReadError({
+        path: skill.installations[0]?.path ?? id,
+        cause: "Installation no longer resolves; refresh the catalog.",
+      });
+    const content = yield* readSkillMarkdown(filePath);
+    return Option.some({ ...skill, content });
   });
-
   return SkillCatalog.of({ list, detail });
 });
 

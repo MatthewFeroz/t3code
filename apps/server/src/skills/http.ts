@@ -48,7 +48,7 @@ export const skillsHttpApiLayer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
           const cwd = yield* resolveProjectDirectory(args.query.projectId);
-          const detail = yield* catalog.detail(args.params.scope, args.params.name, cwd).pipe(
+          const detail = yield* catalog.detail(args.params.id, cwd).pipe(
             Effect.catchTags({
               SkillReadError: (cause) => failEnvironmentInternal("skill_read_failed", cause),
               SkillDiscoveryError: (cause) =>

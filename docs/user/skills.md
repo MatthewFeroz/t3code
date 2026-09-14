@@ -1,29 +1,18 @@
 # Skills
 
-Open **Skills** from the shortcut at the bottom left to inspect the agent skills installed on the
-selected environment. This works the same from the web and desktop clients. When you connect
-remotely, the page shows skills from the remote environment, not the device displaying the page.
+Open **Skills** from the sidebar or command palette to inspect skills reported by your configured
+provider instances. Choose an **Environment**, then a **Project** to include that workspace's skills.
+**Environment skills** shows each provider's environment-level inventory. Remote connections show
+skills on the selected server, not on the device displaying the page.
 
-Choose an **Environment**, then a **Project** to inspect its skills alongside global skills.
-Choose **Global skills only** to browse skills outside any project. The project list belongs to the
-selected environment, and switching environments clears the selected project.
+Filter by provider instance, enabled status, invocation policy, or scope. Disabled skills remain
+visible. Invocation policy describes whether the user, the agent, both, or neither can invoke the
+skill when enabled; a disabled provider instance cannot run it. Discovery and policy information
+come from the provider, so availability depends on what that provider reports.
 
-The catalog uses the `skills` CLI and includes both scopes:
+Installations pointing to the same resolved file share one entry. Select it to inspect the
+instructions and each provider instance's skill name, status, installation path, and resolved
+destination. Different files with the same name remain separate entries.
 
-- **Project** skills belong to the selected project's directory.
-- **Global** skills belong to the server user's agent configuration directories.
-
-Select a skill to read its `SKILL.md`, see its canonical path and source, and check which installed
-agents can use it. A shared install may appear under many agents because the `skills` CLI keeps one
-canonical copy and symlinks it into each agent's skill directory.
-
-The page is read-only. Add, remove, or update skills in a terminal with the `skills` CLI, then use
-**Refresh** to reload the catalog. For example:
-
-```sh
-npx skills add <package>
-npx skills list --global
-npx skills update
-```
-
-If the page cannot load, verify that `npx skills list --json` works in the selected project's directory on that environment.
+The page is read-only. Install or change skills through their provider, then use **Refresh** to
+reload discovery. Skills are not automatically copied or synchronized between environments.

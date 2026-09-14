@@ -575,7 +575,7 @@ class EnvironmentSkillsHttpApi extends HttpApiGroup.make("skills")
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(
-    HttpApiEndpoint.get("detail", "/api/skills/:scope/:name", {
+    HttpApiEndpoint.get("detail", "/api/skills/:id", {
       headers: OptionalBearerHeaders,
       params: AgentSkillDetailParams,
       query: AgentSkillQuery,

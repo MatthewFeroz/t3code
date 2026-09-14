@@ -15,12 +15,13 @@ export const fetchEnvironmentSkills = Effect.fn("clientRuntime.fetchEnvironmentS
   const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     prepared,
+    group: "skills",
     signer,
     remoteAuthorization,
     method: "GET",
-    timeoutMs: 35_000,
+    timeoutMs: 120_000,
     url: (httpBaseUrl) => makeEnvironmentHttpApiUrlBuilder(httpBaseUrl).skills.list({ query }),
-    request: ({ client, headers }) => client.skills.list({ headers, query }),
+    request: ({ client, headers }) => client.list({ headers, query }),
   });
 });
 
@@ -33,12 +34,13 @@ export const fetchEnvironmentSkill = Effect.fn("clientRuntime.fetchEnvironmentSk
   const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     prepared,
+    group: "skills",
     signer,
     remoteAuthorization,
     method: "GET",
-    timeoutMs: 35_000,
+    timeoutMs: 120_000,
     url: (httpBaseUrl) =>
       makeEnvironmentHttpApiUrlBuilder(httpBaseUrl).skills.detail({ params, query }),
-    request: ({ client, headers }) => client.skills.detail({ headers, query, params }),
+    request: ({ client, headers }) => client.detail({ headers, query, params }),
   });
 });
