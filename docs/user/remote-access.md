@@ -21,13 +21,15 @@ server with `npx t3 serve`. Saving your sign-in alone does not make the machine
 reachable.
 
 When you open a self-hosted T3 server in a browser, set up T3 Connect from the
-host's terminal. Sign-in happens in the hosted app, not at the server's local or
-private-network address. Use `npx t3@latest connect link --headless` to link an
-existing setup, then restart the server. Local use does not require T3 Connect.
+host's terminal. Sign-in happens on the authorization page provided by the CLI,
+not at the server's local or private-network address. Use
+`npx t3@latest connect link --headless` to link an existing setup, then restart the
+server. Local use does not require T3 Connect.
 
 On your other device, sign in to the same T3 Connect account and choose the
-environment. Over SSH, the CLI prints a browser link and accepts the returned
-authorization code, so you do not need to forward an OAuth callback port.
+environment. Over SSH, the CLI prints a browser link and a short code. Open the
+link on any device, confirm the code matches, and approve. The CLI continues on
+its own, so you do not need to forward an OAuth callback port.
 
 T3 Connect renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
