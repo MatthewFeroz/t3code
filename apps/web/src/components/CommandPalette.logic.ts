@@ -1,6 +1,7 @@
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import type { CommandPaletteLinkedThreads } from "../commandPaletteBus";
 import {
+  type EnvironmentId,
   type FilesystemBrowseEntry,
   type KeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -60,7 +61,7 @@ export function browseInputEndPaddingClass(input: {
 export type SearchOverlayMode = "command" | "files" | "content";
 
 export type CommandPaletteOpenIntent =
-  | { readonly kind: "add-project" | "new-thread-in" }
+  | { readonly kind: "add-project" | "new-thread-in" | "change-theme" }
   | {
       readonly kind: "search";
       readonly query: string;
@@ -83,6 +84,7 @@ export type CommandPaletteUiAction =
     }
   | { readonly _tag: "OpenAddProject" }
   | { readonly _tag: "OpenNewThreadIn" }
+  | { readonly _tag: "OpenChangeTheme" }
   | { readonly _tag: "ClearOpenIntent" };
 
 export function reduceCommandPaletteUiState(
@@ -112,6 +114,8 @@ export function reduceCommandPaletteUiState(
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
     case "OpenNewThreadIn":
       return { open: true, mode: "command", openIntent: { kind: "new-thread-in" } };
+    case "OpenChangeTheme":
+      return { open: true, mode: "command", openIntent: { kind: "change-theme" } };
     case "ClearOpenIntent":
       return state.openIntent ? { ...state, openIntent: null } : state;
   }
@@ -143,6 +147,8 @@ export interface CommandPaletteItem {
     readonly toggle: () => void;
   };
   readonly shortcutCommand?: KeybindingCommand;
+  /** Sorts after every other match in its group; see `SettingsSearchItem.secondary`. */
+  readonly secondary?: boolean;
 }
 
 export interface CommandPaletteActionItem extends CommandPaletteItem {
@@ -164,11 +170,23 @@ export interface CommandPaletteGroup {
   readonly items: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
 }
 
-export interface CommandPaletteView {
+export type CommandPaletteView = {
   readonly addonIcon: ReactNode;
-  readonly groups: ReadonlyArray<CommandPaletteGroup>;
   readonly initialQuery?: string;
-  readonly projectSelectorPriorityValue?: string;
+} & (
+  | { readonly kind: "project-selector"; readonly priorityValue?: string; readonly groups?: never }
+  | { readonly kind?: "groups"; readonly groups: ReadonlyArray<CommandPaletteGroup> }
+);
+
+/** Favorites follow physical projects even when their display groups change. */
+export function toggleFavoriteProjectKeys(
+  favoriteKeys: ReadonlyArray<string>,
+  memberKeys: ReadonlyArray<string>,
+): string[] {
+  const members = new Set(memberKeys);
+  return favoriteKeys.some((key) => members.has(key))
+    ? favoriteKeys.filter((key) => !members.has(key))
+    : [...new Set([...favoriteKeys, ...memberKeys])];
 }
 
 export function enumerateCommandPaletteItems(
@@ -190,6 +208,22 @@ export type CommandPaletteMode = "root" | "root-browse" | "submenu" | "submenu-b
 // as the real project title: the automatic project icon is derived from it, and
 // every other surface uses the real title, so overriding it desyncs the icon.
 export type CommandPaletteProject = Project & { readonly displayName: string };
+
+export function buildCommandPaletteProjectMetadata(input: {
+  readonly projects: ReadonlyArray<Pick<Project, "environmentId" | "title" | "workspaceRoot">>;
+  readonly locationByEnvironmentId: ReadonlyMap<EnvironmentId, { readonly label: string }>;
+}) {
+  const searchTerms: string[] = [];
+  const environmentLabels = new Set<string>();
+
+  for (const project of input.projects) {
+    const label = input.locationByEnvironmentId.get(project.environmentId)?.label ?? "Remote";
+    searchTerms.push(project.title, project.workspaceRoot, label);
+    environmentLabels.add(label);
+  }
+
+  return { searchTerms, environmentLabels: [...environmentLabels] };
+}
 
 export function buildProjectActionItems(input: {
   projects: ReadonlyArray<CommandPaletteProject>;
@@ -461,7 +495,12 @@ export function filterCommandPaletteGroups(input: {
         rank: rankCommandPaletteItemMatch(item, normalizedQuery, queryTokens),
       });
     })
-      .toSorted((left, right) => right.rank - left.rank || left.index - right.index)
+      .toSorted(
+        (left, right) =>
+          Number(left.item.secondary ?? false) - Number(right.item.secondary ?? false) ||
+          right.rank - left.rank ||
+          left.index - right.index,
+      )
       .map((entry) => entry.item);
 
     if (items.length === 0) {

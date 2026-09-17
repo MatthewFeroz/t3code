@@ -13,6 +13,12 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
+On web and desktop, open **New thread in...** in the command palette and star a
+project to keep it in **Favorites**. Star it again to remove it. Favorites stay
+with each project when you change project grouping and appear first in the new
+thread’s project chooser too. You can also highlight a project in the command
+palette and press `Alt+Enter` to toggle its favorite status.
+
 ### Start in the background
 
 In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Enter`
@@ -28,6 +34,9 @@ On web and desktop, you can also drag files from your computer onto any thread r
 the thread opens and the files are attached in its composer, ready for
 your next message. The same per-message file limits apply as when attaching
 files directly; see [Attach files](./composer.md#attach-files).
+
+On web and desktop, pinning or unpinning a thread keeps the sidebar at your current
+scroll position instead of following the thread to its new place in the list.
 
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 
@@ -86,10 +95,12 @@ settlement, but an old closed or merged pull request does not settle work you
 resumed after it closed.
 
 Change these rules in **Settings → General**. They continue to run when your apps
-are closed. Changes apply to connected environments that support shared settings;
-offline environments and older servers keep their previous values. If connected
-environments disagree, **Apply to all** copies your current settings to those named
-in the warning. Changing a rule does not reopen already settled threads.
+are closed. On web and desktop, choose an environment at the top to change only
+its rules, or **All environments** to update connected environments together.
+Mixed values show where the selected environments disagree. Mobile applies these
+rules to connected environments that support shared settings. Offline environments
+and older servers keep their previous values. Changing a rule does not reopen
+already settled threads.
 
 ## Link a pull request
 
@@ -120,3 +131,10 @@ On web and desktop, use **Agents** to follow work delegated to subagents.
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
 finishes; the call's own result shows its status.
+
+## Snooze until later
+
+Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your
+local time zone, or a duration in minutes, hours, or days. Durations start when
+you confirm; one day means 24 hours. On web and desktop, you can also snooze
+several selected threads together. Choose **Wake thread** to bring a thread back early.

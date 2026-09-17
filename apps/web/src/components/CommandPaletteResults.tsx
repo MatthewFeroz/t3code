@@ -14,6 +14,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "./ui/command";
+import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { cn } from "~/lib/utils";
 
@@ -179,12 +180,6 @@ function CommandPaletteResultRow(props: {
       onMouseDown={(event) => {
         event.preventDefault();
       }}
-      onPointerDownCapture={(event) => {
-        if ((event.target as Element).closest("[data-command-palette-favorite]")) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
-      }}
       onClick={() => {
         props.onExecuteItem(props.item);
       }}
@@ -216,11 +211,11 @@ function CommandPaletteResultRow(props: {
         <Tooltip>
           <TooltipTrigger
             render={
-              <button
+              <Button
                 type="button"
-                data-command-palette-favorite
+                size="icon-xs"
+                variant="ghost"
                 className={cn(
-                  "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                   props.item.favorite.isFavorite
                     ? "text-yellow-500 hover:text-yellow-400"
                     : "text-muted-foreground/40 hover:text-muted-foreground",
@@ -234,10 +229,10 @@ function CommandPaletteResultRow(props: {
                 <StarIcon
                   className={cn("size-3", props.item.favorite.isFavorite && "fill-current")}
                 />
-              </button>
+              </Button>
             }
           />
-          <TooltipPopup side="top">{props.item.favorite.label}</TooltipPopup>
+          <TooltipPopup side="top">{props.item.favorite.label} (Alt+Enter)</TooltipPopup>
         </Tooltip>
       ) : null}
       {props.item.timestamp ? (
