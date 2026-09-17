@@ -1737,6 +1737,7 @@ function OpenCommandPaletteDialog(props: {
     currentProjectEnvironmentId,
     currentProjectId,
     openIntent,
+    projectThreadItems.length,
     pushPaletteView,
   ]);
 
