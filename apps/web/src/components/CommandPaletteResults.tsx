@@ -215,19 +215,20 @@ function CommandPaletteResultRow(props: {
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                className={cn(
-                  props.item.favorite.isFavorite
-                    ? "text-yellow-500 hover:text-yellow-400"
-                    : "text-muted-foreground/40 hover:text-muted-foreground",
-                )}
                 aria-label={props.item.favorite.label}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                }}
                 onClick={(event) => {
                   event.stopPropagation();
                   props.item.favorite?.toggle();
                 }}
               >
                 <StarIcon
-                  className={cn("size-3", props.item.favorite.isFavorite && "fill-current")}
+                  className={cn(
+                    "size-3",
+                    props.item.favorite.isFavorite && "fill-current text-yellow-500",
+                  )}
                 />
               </Button>
             }
