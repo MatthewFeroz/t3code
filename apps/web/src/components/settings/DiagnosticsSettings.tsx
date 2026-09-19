@@ -924,7 +924,6 @@ export function DiagnosticsSettingsPanel() {
 
   return (
     <SettingsPageContainer width="expanded" className="gap-10">
-      <TelemetryExportSettings key={environmentId} />
       <ResourceTelemetryDiagnostics environmentId={environmentId} />
 
       <SettingsSection
@@ -1318,6 +1317,7 @@ export function DiagnosticsSettingsPanel() {
           <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
         )}
       </SettingsSection>
+      <TelemetryExportSettings key={environmentId} />
     </SettingsPageContainer>
   );
 }
