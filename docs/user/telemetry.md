@@ -54,7 +54,7 @@ logs; the LangSmith endpoint below accepts traces.
    $env:T3CODE_OTLP_SERVICE_NAME = 't3-otel'
    $env:T3CODE_OTLP_HEADERS = 'x-api-key=' + [uri]::EscapeDataString($apiKey) + ',Langsmith-Project=t3-otel'
    $apiKey = $null
-   try { npx t3 } finally { Remove-Item Env:T3CODE_OTLP_HEADERS }
+   try { npx.cmd t3 } finally { Remove-Item Env:T3CODE_OTLP_HEADERS }
    ```
 
    Use the API host for your LangSmith region. T3 Code takes a **full signal URL**,
