@@ -459,6 +459,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",
+    scope: "environment",
     searchTerms: ["logs traces processes resource history failures spans cpu memory"],
   },
   {
