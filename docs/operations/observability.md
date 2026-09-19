@@ -2,6 +2,9 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
+For a hosted trace receiver, follow the [LangSmith setup tutorial](../user/telemetry.md#view-traces-in-langsmith).
+When testing from a worktree, use `vp run dev` in place of `npx t3` to keep state isolated.
+
 T3 Code has one server-side observability model:
 
 - pretty logs go to stdout for humans
