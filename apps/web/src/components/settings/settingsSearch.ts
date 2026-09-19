@@ -448,6 +448,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles source control content default provider"],
   },
   {
+    id: "telemetry-export",
+    title: "OpenTelemetry export",
+    to: "/settings/general",
+    targetId: "diagnostics",
+    scope: "environment",
+    searchTerms: ["OTel OTLP telemetry export endpoints logs traces metrics Grafana"],
+  },
+  {
     id: "diagnostics",
     title: "Diagnostics",
     to: "/settings/general",
