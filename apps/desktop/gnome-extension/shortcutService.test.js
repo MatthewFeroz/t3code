@@ -62,13 +62,18 @@ it("reports conflicts and does not install a listener", async () => {
 it("replaces the old chord and releases the replacement on disable", async () => {
   const f = fixture();
   await f.service.bind(":1.23", name, "<Control>w");
+  f.grab.mockReturnValueOnce(43);
   await f.service.bind(":1.23", name, "<Control>r");
-  expect(f.ungrab).toHaveBeenCalledOnce();
-  f.service.disable();
-  expect(f.ungrab).toHaveBeenCalledTimes(2);
-  expect(f.unwatch).toHaveBeenCalledTimes(2);
+  expect(f.ungrab.mock.calls).toEqual([[42]]);
   f.service.activated(42);
   expect(f.activate).not.toHaveBeenCalled();
+  f.service.activated(43);
+  expect(f.activate).toHaveBeenCalledOnce();
+  f.service.disable();
+  expect(f.ungrab.mock.calls).toEqual([[42], [43]]);
+  expect(f.unwatch).toHaveBeenCalledTimes(2);
+  f.service.activated(43);
+  expect(f.activate).toHaveBeenCalledOnce();
 });
 
 it("does not register after disable during authorization", async () => {
@@ -92,4 +97,43 @@ it("suppresses locked-session activations and resumes on unlock", async () => {
   available = true;
   f.service.activated(42);
   expect(f.activate).toHaveBeenCalledOnce();
+});
+
+it("keeps the original shortcut active when its replacement conflicts", async () => {
+  const f = fixture();
+  await f.service.bind(":1.23", name, "<Control>w");
+  f.grab.mockReturnValueOnce(0);
+  await expect(f.service.bind(":1.23", name, "<Control>r")).rejects.toThrow("already used");
+  f.service.activated(42);
+  expect(f.activate).toHaveBeenCalledWith(":1.23");
+  expect(f.ungrab).not.toHaveBeenCalled();
+  f.vanish();
+  expect(f.ungrab).toHaveBeenCalledWith(42);
+});
+
+it("keeps the original shortcut active when watching its replacement fails", async () => {
+  const f = fixture();
+  await f.service.bind(":1.23", name, "<Control>w");
+  f.grab.mockReturnValueOnce(43);
+  f.watch.mockImplementationOnce(() => {
+    throw new Error("Cannot watch sender");
+  });
+  await expect(f.service.bind(":1.23", name, "<Control>r")).rejects.toThrow("Cannot watch sender");
+  expect(f.ungrab.mock.calls).toEqual([[43]]);
+  f.service.activated(43);
+  expect(f.activate).not.toHaveBeenCalled();
+  f.service.activated(42);
+  expect(f.activate).toHaveBeenCalledWith(":1.23");
+  f.vanish();
+  expect(f.ungrab.mock.calls).toEqual([[43], [42]]);
+});
+
+it("keeps a repeated binding active without grabbing it again", async () => {
+  const f = fixture();
+  await f.service.bind(":1.23", name, "<Control>w");
+  await f.service.bind(":1.23", name, "<Control>w");
+  expect(f.grab).toHaveBeenCalledOnce();
+  expect(f.ungrab).not.toHaveBeenCalled();
+  f.service.activated(42);
+  expect(f.activate).toHaveBeenCalledWith(":1.23");
 });

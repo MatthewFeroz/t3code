@@ -16,17 +16,19 @@ export class ShortcutService {
       throw new Error("Only T3 Code may register a snapshot shortcut.");
     if (!this.enabled || !this.isAvailable())
       throw new Error("Snapshot shortcuts are unavailable in this session.");
-    this.release(sender);
+    const previous = this.bindings.get(sender);
+    if (previous?.accelerator === accelerator) return;
     const action = this.grab(accelerator);
     if (!action) throw new Error("This shortcut is already used by the system or another app.");
-    const binding = { action, watch: 0 };
-    this.bindings.set(sender, binding);
+    const binding = { action, accelerator, watch: 0 };
     try {
       binding.watch = this.watch(sender, () => this.release(sender));
     } catch (error) {
-      this.release(sender);
+      this.ungrab(action);
       throw error;
     }
+    this.release(sender);
+    this.bindings.set(sender, binding);
   }
 
   activated(action) {

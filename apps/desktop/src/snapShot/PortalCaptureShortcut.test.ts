@@ -25,6 +25,7 @@ class FakeBus extends NodeEvents.EventEmitter {
   version = 2;
   versionError: Error | undefined;
   gnomeError: Error | undefined;
+  gnomeOwnerError: Error | undefined;
   propertiesError: Error | undefined;
   requestNameReply = 1;
   autoBind = true;
@@ -96,8 +97,10 @@ class FakeBus extends NodeEvents.EventEmitter {
       if (this.gnomeError) throw this.gnomeError;
       return reply();
     }
-    if (message.member === "GetNameOwner")
+    if (message.member === "GetNameOwner") {
+      if (message.body[0] === gnome && this.gnomeOwnerError) throw this.gnomeOwnerError;
       return reply([message.body[0] === gnome ? ":1.3" : ":1.2"]);
+    }
     if (message.member === "GetAll") {
       if (this.propertiesError) throw this.propertiesError;
       return reply([{}]);
@@ -524,6 +527,25 @@ it.each(["conflict", "old-extension", "another-instance"])(
     expect(bus.disconnect).toHaveBeenCalledOnce();
   },
 );
+
+it.each([
+  ["NameHasNoOwner", "Set up the GNOME extension in SnapShots setup"],
+  ["AccessDenied", "Permission denied"],
+])("reports GNOME owner lookup failure %s", async (type, message) => {
+  const bus = new FakeBus();
+  bus.versionError = new DBusError("org.freedesktop.DBus.Error.UnknownInterface", "missing");
+  bus.gnomeOwnerError = new DBusError(`org.freedesktop.DBus.Error.${type}`, "Permission denied");
+  const { client } = start(bus, chord, false, true);
+  await client.ready;
+  expect(client.state).toMatchObject({
+    shortcutRegistered: false,
+    shortcutPending: false,
+    shortcutCanRetry: true,
+  });
+  expect(client.state.shortcutMessage).toContain(message);
+  expect(bus.calls.some((call) => call.member === "BindShortcut")).toBe(false);
+  expect(bus.disconnect).toHaveBeenCalledOnce();
+});
 
 it.each([true, false])(
   "checks whether GDBus InvalidArgs means a missing interface (%s)",

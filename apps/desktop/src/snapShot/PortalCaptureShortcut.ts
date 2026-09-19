@@ -401,6 +401,12 @@ export class PortalCaptureShortcut {
       member: "GetNameOwner",
       signature: "s",
       body: [GNOME],
+    }).catch((error: unknown) => {
+      if (error instanceof DBusError && error.type === `${DBUS}.Error.NameHasNoOwner`)
+        throw new Error(
+          "Set up the GNOME extension in SnapShots setup, then sign out and back in.",
+        );
+      throw error;
     });
     this.gnomeOwner = string(owner.body[0]);
     const parts = trigger.split("+");
