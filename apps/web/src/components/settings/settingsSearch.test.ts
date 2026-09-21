@@ -51,8 +51,8 @@ describe("searchSettings", () => {
       expect(searchSettings(query)).toContainEqual(
         expect.objectContaining({
           id: "telemetry-export",
-          to: "/settings/general",
-          targetId: "diagnostics",
+          to: "/settings/diagnostics",
+          targetId: "telemetry-export",
           scope: "environment",
         }),
       );

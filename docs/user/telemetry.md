@@ -23,28 +23,23 @@ The receiver must be reachable from the server's machine. For a remote server,
 `localhost` means that remote machine. These settings apply to the environment,
 including when you use it from mobile.
 
-Clear a field and save to disable that signal after restarting. Server environment
-variables and desktop startup configuration take precedence over saved endpoints;
-remove those overrides too if they are configured. The running configuration is
-shown separately so you can compare it with your saved settings. Confirm delivery
-in your receiver by checking for recent records.
+Each endpoint is resolved at startup: its `T3CODE_OTLP_*_URL` environment variable
+wins over desktop startup configuration, which wins over the saved setting.
+To disable a signal, clear its saved endpoint and any startup overrides, then
+restart. Confirm delivery in your receiver by checking for recent records.
 
 Diagnostic exports go to the receiver you configure and are controlled separately
 from product usage collection. Update older servers if log export is unavailable.
 
 ### View traces in LangSmith
 
-LangSmith can receive T3 Code's existing OpenTelemetry traces; you do not need to
-install LangChain. A trace shows the timing and child operations of one activity.
-Metrics summarize trends across activities, while structured logs record individual
-messages. Use a separate receiver, such as Aspire or Grafana, for OTLP metrics and
-logs; the LangSmith endpoint below accepts traces.
+LangSmith accepts T3 Code traces without installing LangChain. Use a separate
+receiver for metrics and logs. Traces show instrumented T3 operations, not every
+model call or tool invocation inside a provider; token usage may be absent.
 
-1. Create a LangSmith API key in the workspace where you want to inspect traces.
-   Choose a project name, such as `t3-otel`.
-2. On the machine running the T3 Code server, configure its startup environment.
-   This PowerShell example prompts for the key without putting it in command
-   history, then starts a server from the same shell:
+1. Create a LangSmith API key and choose a project, such as `t3-otel`.
+2. For a new server, run this PowerShell example on its machine. It prompts for
+   the key without putting it in command history:
 
    ```powershell
    $secureKey = Read-Host 'LangSmith API key' -AsSecureString
@@ -57,35 +52,23 @@ logs; the LangSmith endpoint below accepts traces.
    try { npx.cmd t3 } finally { Remove-Item Env:T3CODE_OTLP_HEADERS }
    ```
 
-   Use the API host for your LangSmith region. T3 Code takes a **full signal URL**,
-   including `/otel/v1/traces`, rather than a base OTLP URL. See
+   Use your region's API host and the full `/otel/v1/traces` path. See
    [LangSmith's OpenTelemetry setup](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
    for regional endpoints and authentication details.
 
-   Alternatively, save that traces URL in **Settings > General > Diagnostics**
-   and omit `T3CODE_OTLP_TRACES_URL` from the launch environment. The API key header
-   and protocol still need startup environment variables. For an existing server,
-   configure its launcher and restart it instead of starting a second server
-   against the same data directory. A desktop server must inherit these variables
-   from its launcher; setting them in an unrelated terminal has no effect.
+   Alternatively, save the URL in Diagnostics and omit `T3CODE_OTLP_TRACES_URL`.
+   Headers and protocol still require environment variables. For an existing
+   server, configure its launcher and restart it; do not start another against
+   the same data directory. Desktop must inherit these variables from its launcher.
 
-3. Use the connected T3 Code client, then open the project in LangSmith and select
-   a recent time range. Completed spans are exported in batches, normally every
-   10 seconds. Open a trace to inspect durations, child spans, attributes, and
-   recorded errors. Startup or HTTP traces are enough to confirm delivery; you
-   do not need to produce a failed agent turn.
+3. Use T3 Code, then select a recent time range in your LangSmith project.
+   Completed spans export in batches, normally every 10 seconds. Open a trace
+   to inspect durations, child spans, and errors; startup or HTTP traces confirm delivery.
 
-The traces describe operations instrumented by T3 Code. Exporting them does not
-automatically expose every model call or tool invocation inside each provider.
-An empty prompt or token-usage view does not mean export failed.
-
-Keep metrics and logs pointed at their own receiver if you use them.
 `T3CODE_OTLP_HEADERS` and `T3CODE_OTLP_PROTOCOL` apply to all three exporters. If
 your destinations require different credentials, use an OpenTelemetry Collector
 with authentication configured separately for each destination.
 
-If no traces appear, check the project, region, key, recent time range, and the
-server's running endpoint. Check server output for export failures. Saving an
-endpoint alone does not prove delivery. To stop exporting, remove the traces
-URL from the launch environment and saved settings, remove any desktop override,
-and restart the server.
+If traces are missing, check the project, region, key, time range, running endpoint,
+and server output for export failures. To stop exporting, clear endpoints and
+overrides as described above, then restart.
