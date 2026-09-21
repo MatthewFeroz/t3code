@@ -1317,7 +1317,10 @@ export function DiagnosticsSettingsPanel() {
           <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
         )}
       </SettingsSection>
-      <TelemetryExportSettings key={environmentId} />
+      {/* Let initial tables settle before the search target scrolls into view. */}
+      {!isInitialLoading && !isProcessInitialLoading && (
+        <TelemetryExportSettings key={environmentId} />
+      )}
     </SettingsPageContainer>
   );
 }
