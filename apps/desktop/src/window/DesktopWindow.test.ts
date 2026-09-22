@@ -601,6 +601,14 @@ describe("DesktopWindow", () => {
     );
   });
 
+  it("preserves fallback bounds for displays below the requested minimum", () => {
+    const bounds = DesktopWindow.resolveInitialMainWindowBounds(null, [
+      { x: 0, y: 26, width: 280, height: 240 },
+    ]);
+    assert.deepEqual(bounds, { x: 0, y: 26, width: 280, height: 240 });
+    assert.deepEqual(DesktopAppSettings.normalizeMainWindowBounds(bounds), bounds);
+  });
+
   it("recognizes only same-origin renderer navigations", () => {
     assert.isTrue(
       DesktopWindow.isSameOriginRendererNavigation({
@@ -1005,7 +1013,7 @@ describe("DesktopWindow", () => {
   it.effect("does not persist bounds that fail the domain schema", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
-      fakeWindow.getBounds.mockReturnValue({ x: 100.4, y: 80.2, width: 359.4, height: 319.4 });
+      fakeWindow.getBounds.mockReturnValue({ x: 100.4, y: 80.2, width: 0.4, height: 0.4 });
       const createCount = yield* Ref.make(0);
       const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
       const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];

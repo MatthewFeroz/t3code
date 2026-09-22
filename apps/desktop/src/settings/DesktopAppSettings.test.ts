@@ -278,11 +278,11 @@ describe("DesktopSettings", () => {
     ),
   );
 
-  it.effect("preserves window bounds from a small tiled window", () =>
+  it.effect("preserves compositor bounds below the requested minimum", () =>
     withSettings(
       Effect.gen(function* () {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
-        const mainWindowBounds = { x: 12, y: 563, width: 845, height: 510 };
+        const mainWindowBounds = { x: 12, y: 563, width: 280, height: 240 };
         yield* writeSettingsPatch({ mainWindowBounds });
         const loaded = yield* settings.load;
         assert.deepEqual(loaded.mainWindowBounds, mainWindowBounds);
