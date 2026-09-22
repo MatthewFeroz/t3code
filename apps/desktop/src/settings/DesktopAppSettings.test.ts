@@ -278,6 +278,18 @@ describe("DesktopSettings", () => {
     ),
   );
 
+  it.effect("preserves window bounds from a small tiled window", () =>
+    withSettings(
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        const mainWindowBounds = { x: 12, y: 563, width: 845, height: 510 };
+        yield* writeSettingsPatch({ mainWindowBounds });
+        const loaded = yield* settings.load;
+        assert.deepEqual(loaded.mainWindowBounds, mainWindowBounds);
+      }),
+    ),
+  );
+
   it.effect("rejects window bounds that do not satisfy the domain schema", () =>
     withSettings(
       Effect.gen(function* () {
