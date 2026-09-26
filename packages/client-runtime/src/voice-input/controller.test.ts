@@ -298,7 +298,7 @@ describe("VoiceInputController", () => {
   });
 
   it.each(["cancel", "dispose", "ownerChanged"] as const)(
-    "holds the session after %s until non-abortable transcription settles",
+    "waits after %s for abandoned transcription before starting another composer",
     async (action) => {
       const transcription = deferred<string>();
       const transcriptionEntered = deferred<AbortSignal>();
@@ -322,8 +322,12 @@ describe("VoiceInputController", () => {
       expect(signal.aborted).toBe(true);
 
       const next = createHarness();
-      await next.controller.start();
-      expect(next.controller.currentState.error).toContain("already active");
+      const nextStart = next.controller.start();
+      expect(next.controller.currentState).toEqual({
+        phase: "preparing",
+        error: null,
+        errorAction: null,
+      });
       expect(next.recorder.record).not.toHaveBeenCalled();
 
       transcription.resolve("late text");
@@ -333,11 +337,99 @@ describe("VoiceInputController", () => {
       expect(harness.deleted).toEqual(["file:///voice.m4a"]);
       expect(harness.controller.currentState.phase).toBe("idle");
 
-      await next.controller.start();
+      await nextStart;
       expect(next.controller.currentState.phase).toBe("recording");
       await next.controller.interruptRecording();
     },
   );
+
+  it.each(["preparing", "recording", "transcribing"] as const)(
+    "rejects another composer while a session is actively %s",
+    async (phase) => {
+      const pending = deferred<void>();
+      const entered = deferred<void>();
+      const first = createHarness({
+        getTranscriber: () => ({
+          prepare: async () => {
+            if (phase === "preparing") {
+              entered.resolve();
+              await pending.promise;
+            }
+            return preparedTranscription(async () => {
+              entered.resolve();
+              await pending.promise;
+              return "done";
+            });
+          },
+        }),
+      });
+      const starting = first.controller.start();
+      if (phase !== "preparing") await starting;
+      const stopping = phase === "transcribing" ? first.controller.stop() : undefined;
+      if (phase !== "recording") await entered.promise;
+      const next = createHarness();
+      await next.controller.start();
+      expect(next.controller.currentState.error).toContain("already active");
+      expect(next.recorder.record).not.toHaveBeenCalled();
+      if (phase === "recording") await first.controller.interruptRecording();
+      else first.controller.cancel();
+      pending.resolve();
+      await starting;
+      await stopping;
+    },
+  );
+
+  it.each(["same", "other"] as const)(
+    "waits for abandoned recording cleanup before restarting the %s composer",
+    async (owner) => {
+      const cleanup = deferred<void>();
+      const cleanupEntered = deferred<void>();
+      const first = createHarness({
+        releaseRecording: () => {
+          cleanupEntered.resolve();
+          return cleanup.promise;
+        },
+      });
+      await first.controller.start();
+      first.controller.cancel();
+      await cleanupEntered.promise;
+      const next = owner === "same" ? first : createHarness();
+      const starting = next.controller.start();
+      expect(next.controller.currentState.phase).toBe("preparing");
+      expect(next.recorder.record).toHaveBeenCalledTimes(owner === "same" ? 1 : 0);
+      cleanup.resolve();
+      await starting;
+      expect(next.controller.currentState.phase).toBe("recording");
+      await next.controller.interruptRecording();
+    },
+  );
+
+  it("cancels a waiting composer without starting it or blocking the next composer", async () => {
+    const preparation = deferred<PreparedVoiceTranscription>();
+    const entered = deferred<void>();
+    const first = createHarness({
+      getTranscriber: () => ({
+        prepare: () => {
+          entered.resolve();
+          return preparation.promise;
+        },
+      }),
+    });
+    const firstStart = first.controller.start();
+    await entered.promise;
+    first.controller.dispose();
+    const waiting = createHarness();
+    const waitingStart = waiting.controller.start();
+    waiting.controller.dispose();
+    const next = createHarness();
+    const nextStart = next.controller.start();
+    preparation.reject(new Error("aborted"));
+    await Promise.all([firstStart, waitingStart, nextStart]);
+    expect(waiting.controller.currentState.phase).toBe("idle");
+    expect(waiting.recorder.record).not.toHaveBeenCalled();
+    expect(next.controller.currentState.phase).toBe("recording");
+    await next.controller.interruptRecording();
+  });
 
   it("cancels an in-flight transcriber that rejects when its signal aborts", async () => {
     const transcription = deferred<string>();
@@ -431,7 +523,7 @@ describe("VoiceInputController", () => {
     expect(harness.controller.currentState.error).toContain("draft changed");
   });
 
-  it("keeps the app-wide session locked until canceled preparation settles", async () => {
+  it("waits for canceled preparation before starting another composer", async () => {
     const preparation = deferred<PreparedVoiceTranscription>();
     const preparationEntered = deferred<AbortSignal>();
     const first = createHarness({
@@ -448,18 +540,16 @@ describe("VoiceInputController", () => {
     expect(signal.aborted).toBe(true);
 
     const blocked = createHarness();
-    await blocked.controller.start();
-    expect(blocked.controller.currentState.error).toContain("already active");
+    const nextStart = blocked.controller.start();
+    expect(blocked.controller.currentState.phase).toBe("preparing");
+    expect(blocked.recorder.record).not.toHaveBeenCalled();
 
     preparation.resolve(preparedTranscription());
     await firstStart;
     expect(first.recorder.record).not.toHaveBeenCalled();
-    blocked.controller.cancel();
-
-    const next = createHarness();
-    await next.controller.start();
-    expect(next.controller.currentState.phase).toBe("recording");
-    await next.controller.interruptRecording();
+    await nextStart;
+    expect(blocked.controller.currentState.phase).toBe("recording");
+    await blocked.controller.interruptRecording();
   });
 
   it("does not start the microphone for an owner that changed during preparation", async () => {

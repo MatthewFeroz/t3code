@@ -121,18 +121,29 @@ export function resolveTranscriptCommit(
   };
 }
 
-let activeSession: symbol | null = null;
+type VoiceInputSession = {
+  abandoned: boolean;
+  released: Promise<void>;
+  release: () => void;
+};
+
+let activeSession: VoiceInputSession | null = null;
 let activeTranscriptionOperation: Promise<unknown> | null = null;
 
-function acquireSession(): symbol | null {
-  if (activeSession) return null;
-  const token = Symbol("voice-input-session");
-  activeSession = token;
-  return token;
+function acquireSession(): VoiceInputSession {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const session = { abandoned: false, released, release };
+  activeSession = session;
+  return session;
 }
 
-function releaseSession(token: symbol | null): void {
-  if (token && activeSession === token) activeSession = null;
+function releaseSession(session: VoiceInputSession | null): void {
+  if (!session) return;
+  if (activeSession === session) activeSession = null;
+  session.release();
 }
 
 async function runTranscriptionOperation<T>(operation: () => Promise<T>): Promise<T> {
@@ -177,7 +188,7 @@ export class VoiceInputController {
   private readonly dependencies: VoiceInputControllerDependencies;
   private state: VoiceInputState = IDLE_STATE;
   private operationToken = 0;
-  private sessionToken: symbol | null = null;
+  private sessionToken: VoiceInputSession | null = null;
   private transcription: PreparedVoiceTranscription | null = null;
   private transcriptionAbortController: AbortController | null = null;
   private capturedDraft: VoiceDraftSnapshot | null = null;
@@ -201,17 +212,28 @@ export class VoiceInputController {
       this.setError("This draft is no longer available.", "retry");
       return;
     }
-    const sessionToken = acquireSession();
-    if (!sessionToken) {
+    if (activeSession && !activeSession.abandoned) {
       this.setError("Another voice recording is already active.", "retry");
       return;
     }
 
-    this.sessionToken = sessionToken;
     const operationToken = ++this.operationToken;
+    this.setState({ phase: "preparing", error: null, errorAction: null });
+    // Native calls cannot always abort. Wait for their owner's audio cleanup too.
+    for (;;) {
+      const previousSession = activeSession;
+      if (!previousSession) break;
+      if (!previousSession.abandoned) {
+        this.setError("Another voice recording is already active.", "retry");
+        return;
+      }
+      await previousSession.released;
+      if (!this.isCurrent(operationToken)) return;
+    }
+
+    this.sessionToken = acquireSession();
     const abortController = new AbortController();
     this.transcriptionAbortController = abortController;
-    this.setState({ phase: "preparing", error: null, errorAction: null });
 
     try {
       const transcriber = this.dependencies.getTranscriber();
@@ -470,6 +492,7 @@ export class VoiceInputController {
 
   private invalidateOperation(): void {
     this.operationToken += 1;
+    if (this.sessionToken) this.sessionToken.abandoned = true;
     this.transcriptionAbortController?.abort();
   }
 
