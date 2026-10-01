@@ -169,12 +169,8 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
           "accessoryRectangular",
         ],
       },
-      {
-        name: "AgentActivity",
-        displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
-        supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
-      },
+      // AgentActivity is a Live Activity only. Listing it here would add a
+      // home screen widget that nothing ever publishes a timeline for.
     ],
   },
 ];
