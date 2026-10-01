@@ -172,7 +172,7 @@ Default Grafana login:
 
 #### 2. Export OTLP env vars
 
-For endpoint settings, startup precedence, and LangSmith, see the
+For endpoint settings and startup precedence, see the
 [user telemetry guide](../user/telemetry.md#export-diagnostics-to-your-own-receiver).
 In a worktree, use `vp run dev` instead of `npx t3` to keep state isolated.
 

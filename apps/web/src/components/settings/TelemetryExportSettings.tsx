@@ -4,6 +4,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings } from "./useScopedSettings";
 import { SettingsSection } from "./settingsLayout";
@@ -25,7 +26,6 @@ export function TelemetryExportSettings() {
   const values = { ...saved, ...draft };
   const changed = SIGNALS.some(({ key }) => values[key].trim() !== saved[key]);
   const running = environment?.serverConfig?.observability;
-  const differsFromRunning = SIGNALS.some(({ key }) => saved[key] !== (running?.[key] ?? ""));
 
   if (scope.kind !== "environment") {
     return (
@@ -40,7 +40,7 @@ export function TelemetryExportSettings() {
   return (
     <SettingsSection title="OpenTelemetry export" id="telemetry-export">
       <form
-        className="space-y-4 p-4 sm:p-5"
+        className="grid gap-4 px-4 py-4 sm:px-5"
         onSubmit={async (event) => {
           event.preventDefault();
           if (!environment || saving) return;
@@ -53,7 +53,7 @@ export function TelemetryExportSettings() {
             });
             if (result._tag === "Success") {
               setDraft({});
-              setMessage("Saved. Restart this environment's server to apply changes.");
+              setMessage("Saved. Restart the server to apply.");
             }
           } finally {
             setSaving(false);
@@ -61,16 +61,15 @@ export function TelemetryExportSettings() {
         }}
       >
         <p className="text-xs text-muted-foreground">
-          Send traces, metrics, and logs to an OTLP HTTP receiver from this environment's server.
-          Use a full endpoint for each signal. Leave a field empty to disable its saved export.
+          Send traces, metrics, and logs to an OTLP HTTP receiver. Restart the server to apply.
+          Environment variables override these settings.
         </p>
         {SIGNALS.map(({ key, label, path }) => (
-          <div key={key} className="space-y-1.5">
-            <label htmlFor={key} className="text-sm">
-              {label} endpoint
-            </label>
+          <div key={key} className="grid gap-1.5">
+            <Label htmlFor={key}>{label} endpoint</Label>
             <Input
               id={key}
+              size="sm"
               type="url"
               pattern="https?://.*"
               title="Enter an HTTP or HTTPS endpoint, or leave empty to disable export."
@@ -82,42 +81,35 @@ export function TelemetryExportSettings() {
                 setMessage(null);
               }}
             />
-            <p className="break-all text-xs text-muted-foreground">
-              Running configuration: {running?.[key] || "Disabled"}
-            </p>
+            {saved[key] !== (running?.[key] ?? "") && (
+              <p className="break-all text-xs text-muted-foreground">
+                Running: {running?.[key] || "Disabled"}
+              </p>
+            )}
           </div>
         ))}
-        <p className="text-xs text-muted-foreground">
-          Restart the server after saving. Environment variables and desktop startup configuration
-          override these settings, including empty fields. For remote environments, localhost means
-          the server's machine. Configured endpoints do not confirm successful delivery.
-        </p>
-        {differsFromRunning && (
-          <p className="text-xs text-muted-foreground">
-            Saved endpoints differ from the running configuration. Restart the server to apply them;
-            if they still differ, check its startup overrides.
+        <div className="flex items-center justify-between gap-3">
+          <p role="status" className="text-xs text-muted-foreground">
+            {message}
           </p>
-        )}
-        <div className="flex items-center gap-3">
-          <Button type="submit" size="sm" disabled={!changed || saving}>
-            {saving ? "Saving…" : "Save endpoints"}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={!changed || saving}
-            onClick={() => {
-              setDraft({});
-              setMessage(null);
-            }}
-          >
-            Discard changes
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              disabled={!changed || saving}
+              onClick={() => {
+                setDraft({});
+                setMessage(null);
+              }}
+            >
+              Discard
+            </Button>
+            <Button type="submit" size="xs" disabled={!changed || saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
         </div>
-        <p role="status" className="text-xs text-muted-foreground">
-          {message}
-        </p>
       </form>
     </SettingsSection>
   );
