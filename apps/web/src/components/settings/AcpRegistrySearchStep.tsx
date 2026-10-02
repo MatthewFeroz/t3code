@@ -2,11 +2,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  AcpRegistryPrepareResult,
-  AcpRegistrySearchAgent,
-  EnvironmentId,
-  ProviderInstanceConfig,
+import {
+  rankAcpRegistryAgent,
+  type AcpRegistryPrepareResult,
+  type AcpRegistrySearchAgent,
+  type EnvironmentId,
+  type ProviderInstanceConfig,
 } from "@t3tools/contracts";
 import { ExternalLinkIcon, SearchIcon } from "lucide-react";
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -59,17 +60,15 @@ export function AcpRegistrySearchStep({
   onPreparingChange,
 }: AcpRegistrySearchStepProps) {
   const [query, setQuery] = useState("");
-  // An empty registry query is the compact compatible catalog. Start there so
-  // entering this step is useful before the user knows what to search for.
-  const [submittedQuery, setSubmittedQuery] = useState("");
   const [preparingId, setPreparingId] = useState<string | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const prepareGeneration = useRef(0);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // An empty query returns the whole compatible catalog. Load it once and
+  // filter locally so typing never waits on the server or the Registry CDN.
   const search = useEnvironmentQuery(
     serverEnvironment.searchAcpRegistry({
       environmentId,
-      input: { query: submittedQuery },
+      input: { query: "" },
     }),
   );
   const prepareAgent = useAtomCommand(serverEnvironment.prepareAcpRegistryAgent, {
@@ -79,27 +78,13 @@ export function AcpRegistrySearchStep({
   useEffect(
     () => () => {
       prepareGeneration.current += 1;
-      if (searchTimer.current !== null) clearTimeout(searchTimer.current);
       onPreparingChange?.(false);
     },
     [onPreparingChange],
   );
 
-  const submitSearch = (nextQuery: string) => {
-    if (searchTimer.current !== null) clearTimeout(searchTimer.current);
-    const trimmed = nextQuery.trim();
-    setQuery(trimmed);
-    setPrepareError(null);
-    if (trimmed === submittedQuery) {
-      search.refresh();
-    } else {
-      setSubmittedQuery(trimmed);
-    }
-  };
-
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    submitSearch(query);
   };
 
   const handlePrepare = async (agent: AcpRegistrySearchAgent) => {
@@ -120,7 +105,17 @@ export function AcpRegistrySearchStep({
     }
   };
 
-  const results = search.data?.agents ?? null;
+  const catalog = search.data?.agents ?? null;
+  const results =
+    catalog === null
+      ? null
+      : catalog
+          .flatMap((agent) => {
+            const rank = rankAcpRegistryAgent(agent, query);
+            return rank === undefined ? [] : [{ agent, rank }];
+          })
+          .sort((left, right) => left.rank - right.rank)
+          .map(({ agent }) => agent);
   const isInitialSearch = search.isPending && results === null;
   const isRefreshing = search.isPending && results !== null;
   const resultCount = results?.length ?? 0;
@@ -145,14 +140,8 @@ export function AcpRegistrySearchStep({
             aria-label="Search ACP Registry"
             disabled={preparingId !== null}
             onChange={(event) => {
-              const nextQuery = event.currentTarget.value;
-              setQuery(nextQuery);
+              setQuery(event.currentTarget.value);
               setPrepareError(null);
-              if (searchTimer.current !== null) clearTimeout(searchTimer.current);
-              searchTimer.current = setTimeout(() => {
-                searchTimer.current = null;
-                setSubmittedQuery(nextQuery.trim());
-              }, 300);
             }}
             placeholder="Search agents…"
             size="sm"

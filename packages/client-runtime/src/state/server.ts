@@ -1096,8 +1096,8 @@ export function createServerEnvironmentAtoms<R, E>(
     searchAcpRegistry: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:acp-registry:search",
       tag: WS_METHODS.serverSearchAcpRegistry,
-      // Each submitted search refreshes the server-side registry. Dropping an
-      // abandoned query immediately also interrupts stale in-flight requests.
+      // Each load refreshes the server-side registry, so reopening the add
+      // dialog sees new agents. Dropping an abandoned load interrupts it.
       staleTimeMs: 0,
       idleTtlMs: 0,
     }),

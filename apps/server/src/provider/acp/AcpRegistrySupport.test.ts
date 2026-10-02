@@ -813,6 +813,43 @@ describe("AcpRegistrySupport", () => {
     );
   });
 
+  it.effect("returns the whole compatible catalog for an empty query", () => {
+    const base = makeAgent({
+      binary: { "linux-x86_64": { archive: archiveUrl, cmd: "example-agent" } },
+    });
+    const agents = Array.from({ length: 45 }, (_, index) => ({
+      ...base,
+      id: `agent-${String(index).padStart(2, "0")}`,
+      name: `Agent ${String(index).padStart(2, "0")}`,
+    }));
+    return Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cacheDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-acp-registry-full-catalog-",
+      });
+      const resolver = yield* AcpRegistrySupport.makeAcpRegistryCatalog({
+        cacheDir,
+        toolsDir: `${cacheDir}/tools`,
+        registryUrl,
+      });
+      const result = yield* resolver.search({ query: "" });
+
+      expect(result.agents.map((agent) => agent.id)).toEqual(agents.map((agent) => agent.id));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        resolverLayer((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ version: "1.0.0", agents })),
+            ),
+          ),
+        ),
+      ),
+    );
+  });
+
   it.effect("discards registry agents with blank names or unsafe versions", () => {
     const distribution = {
       binary: {

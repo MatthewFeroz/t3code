@@ -141,42 +141,42 @@ describe("AcpRegistrySearchStep", () => {
     vi.useRealTimers();
   });
 
-  it("loads the catalog immediately and searches only after typing settles", () => {
+  it("loads the catalog once and filters it locally while typing", () => {
+    const amp: AcpRegistrySearchAgent = { ...gemini, id: "amp-acp", name: "Amp", authors: [] };
+    const piAcp: AcpRegistrySearchAgent = {
+      ...gemini,
+      id: "pi-acp",
+      name: "pi ACP",
+      description: "ACP adapter for pi coding agent",
+      authors: [],
+    };
+    state.result = { agents: [amp, gemini, piAcp] };
     const initial = render();
-    expect(state.search).toHaveBeenLastCalledWith({
-      environmentId,
-      input: { query: "" },
-    });
+    expect(state.search).toHaveBeenLastCalledWith({ environmentId, input: { query: "" } });
+    expect(findByAriaLabel(initial, "Add Amp")).not.toBeNull();
 
     const input = findByAriaLabel(initial, "Search ACP Registry");
     expect(input.props.size).toBe("sm");
-    (input.props.onChange as ((event: { currentTarget: { value: string } }) => void) | undefined)?.(
-      { currentTarget: { value: "  Gemini  " } },
-    );
-    vi.advanceTimersByTime(200);
-    render();
+    const type = (value: string) =>
+      (input.props.onChange as (event: { currentTarget: { value: string } }) => void)({
+        currentTarget: { value },
+      });
+
+    type("  pi ");
+    const filtered = render();
     expect(state.search).toHaveBeenLastCalledWith({ environmentId, input: { query: "" } });
-    (input.props.onChange as ((event: { currentTarget: { value: string } }) => void) | undefined)?.(
-      {
-        currentTarget: { value: "  Gemini CLI  " },
-      },
-    );
-    vi.advanceTimersByTime(299);
-    render();
-    expect(state.search).toHaveBeenLastCalledWith({ environmentId, input: { query: "" } });
-    vi.advanceTimersByTime(1);
-    render();
-    expect(state.search).toHaveBeenLastCalledWith({
-      environmentId,
-      input: { query: "Gemini CLI" },
-    });
-    (input.props.onChange as ((event: { currentTarget: { value: string } }) => void) | undefined)?.(
-      {
-        currentTarget: { value: "" },
-      },
-    );
-    vi.advanceTimersByTime(300);
-    render();
+    expect(findByAriaLabel(filtered, "Add pi ACP")).not.toBeNull();
+    expect(visitElements(filtered, (el) => el.props["aria-label"] === "Add Amp")).toBeNull();
+    // Authors are searchable, not just names.
+    type("google");
+    const byAuthor = render();
+    expect(findByAriaLabel(byAuthor, "Add Gemini CLI")).not.toBeNull();
+    expect(visitElements(byAuthor, (el) => el.props["aria-label"] === "Add pi ACP")).toBeNull();
+
+    type("");
+    const cleared = render();
+    expect(findByAriaLabel(cleared, "Add Amp")).not.toBeNull();
+    expect(findByAriaLabel(cleared, "Add pi ACP")).not.toBeNull();
     expect(state.search).toHaveBeenLastCalledWith({ environmentId, input: { query: "" } });
   });
 
@@ -197,47 +197,6 @@ describe("AcpRegistrySearchStep", () => {
     expect(
       visitElements(render(), (element) => element.props.children === "No compatible agents found"),
     ).not.toBeNull();
-  });
-
-  it("keeps same-query refreshes visible and announced while retaining results", () => {
-    const first = render();
-    const input = findByAriaLabel(first, "Search ACP Registry");
-    (input.props.onChange as ((event: { currentTarget: { value: string } }) => void) | undefined)?.(
-      {
-        currentTarget: { value: "Codex" },
-      },
-    );
-    const draft = render();
-    const searchForm = visitElements(draft, (element) => element.type === "form");
-    (searchForm?.props.onSubmit as ((event: { preventDefault: () => void }) => void) | undefined)?.(
-      {
-        preventDefault: vi.fn(),
-      },
-    );
-
-    state.result = { agents: [gemini] };
-    const resultTree = render();
-    expect(state.search).toHaveBeenCalledWith({
-      environmentId,
-      input: { query: "Codex" },
-    });
-    const form = visitElements(resultTree, (element) => element.type === "form");
-    (form?.props.onSubmit as ((event: { preventDefault: () => void }) => void) | undefined)?.({
-      preventDefault: vi.fn(),
-    });
-    expect(state.refresh).toHaveBeenCalledOnce();
-
-    state.isPending = true;
-    const refreshingTree = render();
-    expect(
-      visitElements(
-        refreshingTree,
-        (element) =>
-          element.props.role === "status" &&
-          element.props.children === "Refreshing ACP Registry results.",
-      ),
-    ).not.toBeNull();
-    expect(findByAriaLabel(refreshingTree, "Add Gemini CLI")).not.toBeNull();
   });
 
   it("prepares a result before handing it back to the wizard", async () => {

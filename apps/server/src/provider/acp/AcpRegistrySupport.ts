@@ -1,6 +1,7 @@
 import {
   AcpRegistryOperationError,
   AcpRegistryOperationErrorReason,
+  rankAcpRegistryAgent,
   TrimmedNonEmptyString,
   type AcpRegistryManagedBinaryUninstallInput,
   type AcpRegistryManagedBinaryUninstallResult,
@@ -47,7 +48,9 @@ const ACP_REGISTRY_URL = "https://cdn.agentclientprotocol.com/registry/v1/latest
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024;
 const MAX_PACKAGE_MANIFEST_BYTES = 1024 * 1024;
-const MAX_SEARCH_RESULTS = 20;
+// An empty query returns the whole compatible catalog so clients can filter
+// locally while typing; this only bounds a pathological registry.
+const MAX_SEARCH_RESULTS = 500;
 const REGISTRY_REQUEST_TIMEOUT = "30 seconds";
 const ARCHIVE_REQUEST_TIMEOUT = "20 minutes";
 const PACKAGE_INSTALL_TIMEOUT = "20 minutes";
@@ -564,26 +567,6 @@ function archiveFileName(kind: ArchiveKind): string {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function searchRank(agent: AcpRegistryAgent, query: string): number | undefined {
-  const normalized = query.trim().toLowerCase();
-  if (normalized.length === 0) return 100;
-
-  const id = agent.id.toLowerCase();
-  const name = agent.name.toLowerCase();
-  const authors = (agent.authors ?? []).join(" ").toLowerCase();
-  const description = agent.description.toLowerCase();
-  const terms = normalized.split(/\s+/u);
-  if (id === normalized || name === normalized) return 0;
-  if (id.startsWith(normalized) || name.startsWith(normalized)) return 10;
-
-  const identityTokens = `${id} ${name}`.split(/[^a-z0-9]+/u).filter(Boolean);
-  if (terms.every((term) => identityTokens.some((token) => token.startsWith(term)))) return 20;
-  if (terms.every((term) => id.includes(term) || name.includes(term))) return 30;
-  if (terms.every((term) => authors.includes(term))) return 40;
-  if (terms.every((term) => `${id} ${name} ${authors} ${description}`.includes(term))) return 50;
-  return undefined;
 }
 
 export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(function* (
@@ -1548,7 +1531,7 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
           preference: "auto",
           platformTarget,
         });
-        const rank = searchRank(agent, input.query);
+        const rank = rankAcpRegistryAgent(agent, input.query);
         const packageManager =
           distribution === undefined ? undefined : packageManagerFor(distribution.kind);
         const packageManagerAvailable =

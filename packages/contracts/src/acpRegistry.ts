@@ -72,9 +72,42 @@ export const AcpRegistrySearchAgent = Schema.Struct({
 export type AcpRegistrySearchAgent = typeof AcpRegistrySearchAgent.Type;
 
 export const AcpRegistrySearchResult = Schema.Struct({
-  agents: Schema.Array(AcpRegistrySearchAgent).check(Schema.isMaxLength(20)),
+  agents: Schema.Array(AcpRegistrySearchAgent).check(Schema.isMaxLength(500)),
 });
 export type AcpRegistrySearchResult = typeof AcpRegistrySearchResult.Type;
+
+/**
+ * Ranks a Registry agent against a search query; lower is better and
+ * `undefined` means no match. Shared so clients can filter the compatible
+ * catalog locally with the same ordering the server uses.
+ */
+export function rankAcpRegistryAgent(
+  agent: {
+    readonly id: string;
+    readonly name: string;
+    readonly authors?: ReadonlyArray<string> | undefined;
+    readonly description: string;
+  },
+  query: string,
+): number | undefined {
+  const normalized = query.trim().toLowerCase();
+  if (normalized.length === 0) return 100;
+
+  const id = agent.id.toLowerCase();
+  const name = agent.name.toLowerCase();
+  const authors = (agent.authors ?? []).join(" ").toLowerCase();
+  const description = agent.description.toLowerCase();
+  const terms = normalized.split(/\s+/u);
+  if (id === normalized || name === normalized) return 0;
+  if (id.startsWith(normalized) || name.startsWith(normalized)) return 10;
+
+  const identityTokens = `${id} ${name}`.split(/[^a-z0-9]+/u).filter(Boolean);
+  if (terms.every((term) => identityTokens.some((token) => token.startsWith(term)))) return 20;
+  if (terms.every((term) => id.includes(term) || name.includes(term))) return 30;
+  if (terms.every((term) => authors.includes(term))) return 40;
+  if (terms.every((term) => `${id} ${name} ${authors} ${description}`.includes(term))) return 50;
+  return undefined;
+}
 
 export const AcpRegistryPrepareInput = Schema.Struct({
   agentId: AcpRegistryAgentId,
