@@ -71,8 +71,11 @@ export const AcpRegistrySearchAgent = Schema.Struct({
 });
 export type AcpRegistrySearchAgent = typeof AcpRegistrySearchAgent.Type;
 
+/** The most agents the server accepts from a Registry index. */
+export const ACP_REGISTRY_MAX_AGENTS = 512;
+
 export const AcpRegistrySearchResult = Schema.Struct({
-  agents: Schema.Array(AcpRegistrySearchAgent).check(Schema.isMaxLength(500)),
+  agents: Schema.Array(AcpRegistrySearchAgent).check(Schema.isMaxLength(ACP_REGISTRY_MAX_AGENTS)),
 });
 export type AcpRegistrySearchResult = typeof AcpRegistrySearchResult.Type;
 

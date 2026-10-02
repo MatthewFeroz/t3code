@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
-import { AcpRegistrySettings } from "@t3tools/contracts";
+import { ACP_REGISTRY_MAX_AGENTS, AcpRegistrySettings } from "@t3tools/contracts";
 import {
   HostProcessArchitecture,
   HostProcessEnvironment,
@@ -813,14 +813,14 @@ describe("AcpRegistrySupport", () => {
     );
   });
 
-  it.effect("returns the whole compatible catalog for an empty query", () => {
+  it.effect("returns the whole compatible catalog for an empty query, up to the index cap", () => {
     const base = makeAgent({
       binary: { "linux-x86_64": { archive: archiveUrl, cmd: "example-agent" } },
     });
-    const agents = Array.from({ length: 45 }, (_, index) => ({
+    const agents = Array.from({ length: ACP_REGISTRY_MAX_AGENTS }, (_, index) => ({
       ...base,
-      id: `agent-${String(index).padStart(2, "0")}`,
-      name: `Agent ${String(index).padStart(2, "0")}`,
+      id: `agent-${String(index).padStart(3, "0")}`,
+      name: `Agent ${String(index).padStart(3, "0")}`,
     }));
     return Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
