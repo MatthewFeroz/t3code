@@ -12,16 +12,49 @@ import {
 
 export class LegacyLocalStorageImportError extends Schema.TaggedError<LegacyLocalStorageImportError>()(
   "LegacyLocalStorageImportError",
-  { cause: Schema.Defect() },
-) {}
+  {
+    stage: Schema.Literals([
+      "cleanup-snapshot",
+      "discover-profile",
+      "snapshot-profile",
+      "open-storage",
+      "load-storage",
+      "read-storage",
+      "write-storage",
+      "flush-storage",
+    ]),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `V1 Local Storage import failed during ${this.stage}.`;
+  }
+}
 
-const electronPromise = <A>(run: () => Promise<A>) =>
+export class LegacyLocalStorageSnapshotChangedError extends Schema.TaggedError<LegacyLocalStorageSnapshotChangedError>()(
+  "LegacyLocalStorageSnapshotChangedError",
+  {},
+) {
+  override get message(): string {
+    return "V1 Local Storage changed during import; close V1 and restart V2 to retry.";
+  }
+}
+
+const stageFailure = (stage: LegacyLocalStorageImportError["stage"]) => (cause: unknown) =>
+  new LegacyLocalStorageImportError({ stage, cause });
+const atStage = <A, E, R>(
+  stage: LegacyLocalStorageImportError["stage"],
+  effect: Effect.Effect<A, E, R>,
+) => effect.pipe(Effect.mapError(stageFailure(stage)));
+
+const electronPromise = <A>(stage: LegacyLocalStorageImportError["stage"], run: () => Promise<A>) =>
   Effect.tryPromise({
     try: run,
-    catch: (cause) => new LegacyLocalStorageImportError({ cause }),
+    catch: stageFailure(stage),
   });
 const readStorage = (view: Electron.WebContentsView) =>
   electronPromise(
+    "read-storage",
     async () =>
       (await view.webContents.executeJavaScript(
         `Object.keys(localStorage).map(key => [key, localStorage.getItem(key)])`,
@@ -46,7 +79,7 @@ const openStorage = (session: Electron.Session) =>
           throw cause;
         }
       },
-      catch: (cause) => new LegacyLocalStorageImportError({ cause }),
+      catch: stageFailure("open-storage"),
     }),
     (view) =>
       Effect.sync(() => {
@@ -66,16 +99,18 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
   const path = yield* Path.Path;
   const snapshot = path.join(Electron.app.getPath("userData"), "v1-local-storage-import");
   // Windows can hold the temporary database open until the previous process exits.
-  yield* fs.remove(snapshot, { recursive: true, force: true });
+  yield* atStage("cleanup-snapshot", fs.remove(snapshot, { recursive: true, force: true }));
   const destinationSession = Electron.session.defaultSession;
   const destinationView = yield* openStorage(destinationSession);
-  yield* electronPromise(() => destinationView.webContents.loadURL("t3code://app/"));
+  yield* electronPromise("load-storage", () =>
+    destinationView.webContents.loadURL("t3code://app/"),
+  );
   const current = new Map(yield* readStorage(destinationView));
   if (current.has(LEGACY_LOCAL_STORAGE_IMPORT_KEY)) return;
   let source: string | undefined;
   for (const name of ["t3code", "T3 Code (Alpha)"]) {
     const candidate = path.join(appDataDirectory, name, "Local Storage", "leveldb");
-    if (yield* fs.exists(path.join(candidate, "CURRENT"))) {
+    if (yield* atStage("discover-profile", fs.exists(path.join(candidate, "CURRENT")))) {
       source = candidate;
       break;
     }
@@ -83,13 +118,26 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
   if (!source) return;
   const sourcePath = source;
   const target = path.join(snapshot, "Local Storage", "leveldb");
-  yield* fs.makeDirectory(target, { recursive: true });
-  const files = (yield* fs.readDirectory(sourcePath)).filter((name) => name !== "LOCK").sort();
-  const before = yield* Effect.forEach(files, (name) => fs.stat(path.join(sourcePath, name)));
+  yield* atStage("snapshot-profile", fs.makeDirectory(target, { recursive: true }));
+  const files = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
+    .filter((name) => name !== "LOCK")
+    .sort();
+  const before = yield* atStage(
+    "snapshot-profile",
+    Effect.forEach(files, (name) => fs.stat(path.join(sourcePath, name))),
+  );
   for (const name of files)
-    yield* fs.copyFile(path.join(sourcePath, name), path.join(target, name));
-  const afterFiles = (yield* fs.readDirectory(sourcePath)).filter((name) => name !== "LOCK").sort();
-  const after = yield* Effect.forEach(files, (name) => fs.stat(path.join(sourcePath, name)));
+    yield* atStage(
+      "snapshot-profile",
+      fs.copyFile(path.join(sourcePath, name), path.join(target, name)),
+    );
+  const afterFiles = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
+    .filter((name) => name !== "LOCK")
+    .sort();
+  const after = yield* atStage(
+    "snapshot-profile",
+    Effect.forEach(files, (name) => fs.stat(path.join(sourcePath, name))),
+  );
   // Never acknowledge a snapshot that V1 wrote or compacted while we copied it.
   if (
     files.join("\n") !== afterFiles.join("\n") ||
@@ -100,13 +148,14 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
           Option.getOrNull(after[index]!.mtime)?.getTime(),
     )
   ) {
-    return yield* new LegacyLocalStorageImportError({
-      cause: "V1 Local Storage changed during import; close V1 and restart V2 to retry.",
-    });
+    return yield* new LegacyLocalStorageSnapshotChangedError({});
   }
-  const sourceSession = Electron.session.fromPath(snapshot);
+  const sourceSession = yield* Effect.try({
+    try: () => Electron.session.fromPath(snapshot),
+    catch: stageFailure("open-storage"),
+  });
   const sourceView = yield* openStorage(sourceSession);
-  yield* electronPromise(() => sourceView.webContents.loadURL("t3code://app/"));
+  yield* electronPromise("load-storage", () => sourceView.webContents.loadURL("t3code://app/"));
   const entries = yield* readStorage(sourceView);
   const writes: Array<[string, string]> = [];
   importLegacyLocalStorage(
@@ -119,11 +168,14 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
     },
     entries,
   );
-  yield* electronPromise(() =>
+  yield* electronPromise("write-storage", () =>
     destinationView.webContents.executeJavaScript(`
     for (const [key, value] of ${encodeWrites(writes)}) localStorage.setItem(key, value);
     true;
   `),
   );
-  destinationSession.flushStorageData();
+  yield* Effect.try({
+    try: () => destinationSession.flushStorageData(),
+    catch: stageFailure("flush-storage"),
+  });
 }, Effect.scoped);
