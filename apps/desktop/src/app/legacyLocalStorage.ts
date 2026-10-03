@@ -34,7 +34,7 @@ function recoverEmptyDraft(legacy: unknown, current: unknown) {
 }
 
 /** Preserve V2 choices, adding only V1 stash entries and draft buckets missing in V2. */
-export function mergeLegacyLocalStorageValue(key: string, legacy: string, current: string | null) {
+function mergeLegacyLocalStorageValue(key: string, legacy: string, current: string | null) {
   if (current === null) return legacy;
   if (key !== "t3code:prompt-stash:v2" && key !== "t3code:composer-drafts:v1") return current;
   try {
