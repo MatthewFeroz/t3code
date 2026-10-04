@@ -4,12 +4,13 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { CircleArrowUpIcon } from "lucide-react";
 import { type ComponentProps, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
-import { serverEnvironment } from "~/state/server";
+import { serverEnvironment, updateOutdatedServer } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { manualServerUpdateCommand } from "~/versionSkew";
 import { Button } from "./ui/button";
@@ -44,8 +45,10 @@ export interface ServerUpdateTarget {
   readonly continueThreadsAfterServerUpdate?: boolean;
 }
 
-type UpdateButtonProps = Pick<ComponentProps<typeof Button>, "variant" | "size"> & {
+type UpdateButtonProps = Pick<ComponentProps<typeof Button>, "variant" | "size" | "className"> & {
   readonly label?: string;
+  /** "icon" renders a compact icon button with the label in a tooltip. */
+  readonly appearance?: "button" | "icon";
 };
 
 function useServerUpdate() {
@@ -94,6 +97,7 @@ export function ServerUpdatesAction({
   label = "Update all",
   variant = "outline",
   size = "xs",
+  className,
 }: UpdateButtonProps & {
   readonly targets: ReadonlyArray<ServerUpdateTarget>;
 }) {
@@ -133,6 +137,7 @@ export function ServerUpdatesAction({
     <Button
       size={size}
       variant={variant}
+      className={className}
       disabled={isPending || eligible.length === 0}
       onClick={() => void handleUpdate()}
     >
@@ -158,9 +163,7 @@ export function ServerUpdateProgress({
         <span className="size-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true" />
         <Tooltip>
           <TooltipTrigger render={<span className="min-w-0 truncate">{state.message}</span>} />
-          <TooltipPopup side="top" className="max-w-80">
-            {state.message}
-          </TooltipPopup>
+          <TooltipPopup side="top">{state.message}</TooltipPopup>
         </Tooltip>
       </div>
     );
@@ -191,6 +194,8 @@ export function ServerUpdateAction({
   label = "Update",
   variant = "outline",
   size = "xs",
+  className,
+  appearance = "button",
 }: Omit<ServerUpdateTarget, "continueThreadsAfterServerUpdate"> & UpdateButtonProps) {
   const isDesktopAppUpdate = selfUpdate === "desktop-managed";
   const continueThreadsAfterServerUpdate = useEnvironmentSettings(
@@ -251,17 +256,89 @@ export function ServerUpdateAction({
     );
   }
 
-  if (selfUpdate === null) {
-    const command = manualServerUpdateCommand(targetVersion);
+  const manualCommand = selfUpdate === null ? manualServerUpdateCommand(targetVersion) : null;
+  const actionLabel = manualCommand !== null ? "Copy update command" : label;
+  const onClick =
+    manualCommand !== null
+      ? () => copyToClipboard(manualCommand, { command: manualCommand })
+      : () => void handleUpdate();
+
+  if (appearance === "icon") {
     return (
-      <Button size={size} variant={variant} onClick={() => copyToClipboard(command, { command })}>
-        Copy update command
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              className={className}
+              aria-label={`${actionLabel} for ${serverLabel}`}
+              onClick={onClick}
+            />
+          }
+        >
+          <CircleArrowUpIcon className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipPopup side="top">{actionLabel}</TooltipPopup>
+      </Tooltip>
     );
   }
 
   return (
-    <Button size={size} variant={variant} onClick={() => void handleUpdate()}>
+    <Button size={size} variant={variant} className={className} onClick={onClick}>
+      {actionLabel}
+    </Button>
+  );
+}
+
+/**
+ * Updates a host too old for this client to connect to. Its version comes
+ * from the host descriptor because the host never delivers a server config.
+ */
+export function OutdatedServerUpdateAction({
+  environmentId,
+  serverLabel,
+  fromVersion,
+  targetVersion,
+  label = "Update",
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly serverLabel: string;
+  readonly fromVersion: string | undefined;
+  readonly targetVersion: string;
+  readonly label?: string;
+}) {
+  const update = useAtomCommand(updateOutdatedServer, { reportFailure: false });
+  const handleUpdate = async () => {
+    if (pendingUpdateEnvironmentIds.has(environmentId)) return;
+    pendingUpdateEnvironmentIds.add(environmentId);
+    try {
+      const result = await update({
+        environmentId,
+        input: { targetVersion },
+        ...(fromVersion === undefined ? {} : { fromVersion }),
+      });
+      if (result._tag === "Failure") {
+        if (isAtomCommandInterrupted(result)) return;
+        throw squashAtomCommandFailure(result);
+      }
+      toastManager.add({
+        type: "success",
+        title: `${serverLabel} updated`,
+        description: `Reconnected on t3@${result.value.targetVersion}.`,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Server update failed",
+        description: updateFailureMessage(error),
+      });
+    } finally {
+      pendingUpdateEnvironmentIds.delete(environmentId);
+    }
+  };
+  return (
+    <Button size="xs" variant="outline" onClick={() => void handleUpdate()}>
       {label}
     </Button>
   );
