@@ -589,6 +589,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   // so checking a thread on any device clears it everywhere.
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const scheduledResume = status === "limited" ? resolveScheduledLimitResume(thread) : null;
+  const rowAccessibilityLabel = [
+    thread.title,
+    props.hasQueuedMessages ? "messages queued to send" : null,
+    scheduledResume?.description,
+  ]
+    .filter(Boolean)
+    .join(", ");
   const statusLabel =
     (scheduledResume
       ? { label: scheduledResume.label, className: rowAppearance.tertiaryForegroundClassName }
@@ -966,7 +973,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           />
         ) : null}
         <Text
-          accessibilityLabel={scheduledResume?.description}
           className={cn(
             "text-xs tabular-nums",
             statusLabel?.className ??
@@ -1130,9 +1136,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         interactionOpacity={rowAppearance.interactionOpacity}
         className={rowAppearance.className}
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={
-          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
-        }
+        accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         onPress={() => {
@@ -1162,9 +1166,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         interactionClassName={rowAppearance.interactionClassName}
         interactionOpacity={rowAppearance.interactionOpacity}
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={
-          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
-        }
+        accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         className={rowAppearance.className}
