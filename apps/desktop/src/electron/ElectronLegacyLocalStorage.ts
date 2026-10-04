@@ -135,7 +135,7 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(
     const current = new Map(yield* readStorage(destinationView));
     if (current.has(LEGACY_LOCAL_STORAGE_IMPORT_KEY)) return;
     let source: string | undefined;
-    for (const name of ["t3code", "T3 Code (Alpha)"]) {
+    for (const name of ["T3 Code (Alpha)", "t3code"]) {
       const candidate = path.join(appDataDirectory, name, "Local Storage", "leveldb");
       if (yield* atStage("discover-profile", fs.exists(path.join(candidate, "CURRENT")))) {
         source = candidate;

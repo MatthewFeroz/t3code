@@ -91,6 +91,30 @@ describe("Electron legacy Local Storage lifecycle", () => {
     fromPath.mockReturnValue(sourceSession);
   });
 
+  it.effect.each([true, false])("prefers the Alpha profile when it exists: %s", (hasAlphaProfile) =>
+    Effect.gen(function* () {
+      const directory = yield* fixture;
+      const fs = yield* FileSystem.FileSystem;
+      const fallback = `${directory}/t3code/Local Storage/leveldb/CURRENT`;
+      const alpha = `${directory}/T3 Code (Alpha)/Local Storage/leveldb/CURRENT`;
+      if (hasAlphaProfile) {
+        yield* fs.makeDirectory(`${directory}/T3 Code (Alpha)/Local Storage/leveldb`, {
+          recursive: true,
+        });
+        yield* fs.writeFileString(alpha, "Alpha profile");
+      }
+      makeView.mockImplementation(() => view({}));
+      yield* importLegacyProfile(directory);
+      const snapshot = fromPath.mock.calls[0]![0];
+      assert.equal(
+        yield* fs.readFileString(`${snapshot}/Local Storage/leveldb/CURRENT`),
+        hasAlphaProfile ? "Alpha profile" : "fixture",
+      );
+      assert.equal(yield* fs.readFileString(fallback), "fixture");
+      if (hasAlphaProfile) assert.equal(yield* fs.readFileString(alpha), "Alpha profile");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect.each(["source", "snapshot"] as const)(
     "rejects a same-size %s rewrite with an unchanged timestamp",
     (changed) =>
