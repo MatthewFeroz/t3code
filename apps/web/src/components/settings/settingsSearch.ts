@@ -54,6 +54,7 @@ export interface SettingsSearchItem {
   // not expose a result that points to a missing anchor.
   readonly windowsOnly?: boolean;
   readonly cloudOnly?: boolean;
+  readonly cloudAuthOnly?: boolean;
   readonly environmentOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
   readonly macProviderSettingsOnly?: boolean;
@@ -71,6 +72,7 @@ export interface SettingsSearchItem {
 export interface SettingsSearchAvailability {
   readonly localEnvironmentDisabled?: boolean;
   readonly hasCloudPublicConfig: boolean;
+  readonly canUseCloudAuth: boolean;
   readonly hasEnvironment: boolean;
   readonly hasProviderSettingsEnvironment: boolean;
   readonly hasMacProviderSettingsEnvironment: boolean;
@@ -826,7 +828,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/connections",
     targetId: "connections-environment",
     searchTerms: ["managed tunnel cloud other devices remote"],
-    desktopOnly: true,
     cloudOnly: true,
   },
   {
@@ -837,6 +838,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "connections-environment",
     searchTerms: ["mobile push notifications live activities cloud tunnel"],
     cloudOnly: true,
+    cloudAuthOnly: true,
   },
   {
     id: "connections-environment",
@@ -1005,6 +1007,9 @@ export function filterAvailableSettingsSearchItems(
   return items.filter(
     (item) =>
       (!item.cloudOnly || availability.hasCloudPublicConfig) &&
+      (!item.cloudAuthOnly || availability.canUseCloudAuth) &&
+      // Browsers show the T3 Connect row only when it offers CLI setup guidance.
+      (item.id !== "t3-connect" || isElectron || !availability.canUseCloudAuth) &&
       (!item.environmentOnly || availability.hasEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.macProviderSettingsOnly || availability.hasMacProviderSettingsEnvironment) &&

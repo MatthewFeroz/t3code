@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { AuthAccessWriteScope } from "@t3tools/contracts";
 
-import { canUseCloudAuth } from "~/cloud/publicConfig";
+import { canUseCloudAuth, hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
 import { isLocalEnvironmentDisabled } from "~/localEnvironment";
 import { desktopWslStateAtom } from "~/state/desktopWslState";
@@ -34,7 +34,8 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
     () =>
       filterAvailableSettingsSearchItems({
         localEnvironmentDisabled,
-        hasCloudPublicConfig: canUseCloudAuth(),
+        hasCloudPublicConfig: hasCloudPublicConfig(),
+        canUseCloudAuth: canUseCloudAuth(),
         hasEnvironment: environments.some((environment) => environment.serverConfig !== null),
         hasProviderSettingsEnvironment: environments.some((environment) =>
           isProviderSettingsEnvironmentAvailable({

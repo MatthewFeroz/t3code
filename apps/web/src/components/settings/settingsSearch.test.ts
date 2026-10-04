@@ -152,6 +152,7 @@ describe("searchSettings", () => {
   it("hides settings whose controls are unavailable", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,
+      canUseCloudAuth: false,
       hasEnvironment: false,
       hasProviderSettingsEnvironment: false,
       hasMacProviderSettingsEnvironment: false,
@@ -182,6 +183,7 @@ describe("searchSettings", () => {
   it("offers Cursor Keychain settings only when a macOS provider environment is available", () => {
     const availability = {
       hasCloudPublicConfig: false,
+      canUseCloudAuth: false,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
@@ -201,6 +203,7 @@ describe("searchSettings", () => {
   it("keeps the local toggle searchable without offering hidden host publishing controls", () => {
     const availability = {
       hasCloudPublicConfig: true,
+      canUseCloudAuth: true,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
@@ -221,9 +224,49 @@ describe("searchSettings", () => {
     expect(browser).toContain("publish-agent-activity");
   });
 
+  it("finds CLI Connect guidance on an unsupported browser origin without offering cloud controls", () => {
+    const available = filterAvailableSettingsSearchItems({
+      hasCloudPublicConfig: true,
+      canUseCloudAuth: false,
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: true,
+      hasMacProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+    });
+    expect(searchSettings("T3 Connect", available)[0]).toMatchObject({
+      id: "t3-connect",
+      to: "/settings/connections",
+      targetId: "connections-environment",
+    });
+    expect(searchSettings("publish agent activity", available)).toEqual([]);
+    expect(available.map((item) => item.id)).toContain("connections-environment");
+  });
+
+  it("keeps browser publishing controls searchable when cloud auth is available", () => {
+    const available = filterAvailableSettingsSearchItems({
+      hasCloudPublicConfig: true,
+      canUseCloudAuth: true,
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: true,
+      hasMacProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+    });
+    expect(searchSettings("T3 Connect", available).map((item) => item.id)).not.toContain(
+      "t3-connect",
+    );
+    expect(searchSettings("publish agent activity", available)[0]?.id).toBe(
+      "publish-agent-activity",
+    );
+  });
+
   it("shows automatic settlement settings when the server supports them", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,
+      canUseCloudAuth: false,
       hasEnvironment: false,
       hasProviderSettingsEnvironment: false,
       hasMacProviderSettingsEnvironment: false,
@@ -355,6 +398,7 @@ describe("searchSettings", () => {
   it("keeps environment settings discoverable without a primary environment", () => {
     const available = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,
+      canUseCloudAuth: false,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
@@ -450,6 +494,7 @@ describe("auto-settlement search availability", () => {
     expect(availability.eligibleEnvironmentIds).toEqual([capable.environmentId]);
     const items = filterAvailableSettingsSearchItems({
       hasCloudPublicConfig: false,
+      canUseCloudAuth: false,
       hasEnvironment: true,
       hasProviderSettingsEnvironment: true,
       hasMacProviderSettingsEnvironment: false,
