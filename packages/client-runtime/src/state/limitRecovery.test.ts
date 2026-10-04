@@ -1,11 +1,20 @@
-// @effect-diagnostics globalDate:off -- Exercise viewer-local calendar formatting.
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderInstanceId, RunId } from "@t3tools/contracts";
 import { resolveScheduledLimitResume } from "./limitRecovery.ts";
 
 const runId = RunId.make("limited-run");
-const now = new Date(2026, 9, 4, 1);
-const resetAt = new Date(2026, 9, 4, 4).toISOString();
+function localDate(day: number, hour: number) {
+  return DateTime.toDateUtc(
+    DateTime.makeZonedUnsafe(
+      { year: 2026, month: 10, day, hour },
+      { timeZone: DateTime.zoneMakeLocal(), adjustForTimeZone: true },
+    ),
+  );
+}
+
+const now = localDate(4, 1);
+const resetAt = localDate(4, 4).toISOString();
 const thread = {
   archivedAt: null,
   settledOverride: null,
@@ -33,12 +42,12 @@ const thread = {
 
 describe("scheduled usage-limit resume", () => {
   it("shows the local time for today's reset and the date for another day", () => {
-    const time = new Date(resetAt).toLocaleTimeString(undefined, {
+    const time = DateTime.toDateUtc(DateTime.makeUnsafe(resetAt)).toLocaleTimeString(undefined, {
       hour: "numeric",
       minute: "2-digit",
     });
     expect(resolveScheduledLimitResume(thread, now)?.label).toBe(time);
-    expect(resolveScheduledLimitResume(thread, new Date(2026, 9, 3, 1))?.label).toContain("Oct 4");
+    expect(resolveScheduledLimitResume(thread, localDate(3, 1))?.label).toContain("Oct 4");
     expect(resolveScheduledLimitResume(thread, now)?.description).toContain(
       "Auto-resume scheduled",
     );
@@ -62,7 +71,7 @@ describe("scheduled usage-limit resume", () => {
           ...thread,
           limitRecovery: {
             ...thread.limitRecovery,
-            resetAt: new Date(2026, 9, 5, 4).toISOString(),
+            resetAt: localDate(5, 4).toISOString(),
           },
         },
         now,
@@ -82,7 +91,7 @@ describe("scheduled usage-limit resume", () => {
     ).toBeNull();
   });
   it("shows a later snooze time because recovery cannot start before the thread wakes", () => {
-    const snoozedUntil = new Date(2026, 9, 5, 4).toISOString();
+    const snoozedUntil = localDate(5, 4).toISOString();
     const later = resolveScheduledLimitResume({ ...thread, snoozedUntil }, now);
     const nextDay = resolveScheduledLimitResume(
       {
@@ -118,6 +127,6 @@ describe("scheduled usage-limit resume", () => {
     ).toBeNull();
   });
   it("keeps the scheduled label while waiting for a restart after the reset time", () => {
-    expect(resolveScheduledLimitResume(thread, new Date(2026, 9, 4, 5))).not.toBeNull();
+    expect(resolveScheduledLimitResume(thread, localDate(4, 5))).not.toBeNull();
   });
 });

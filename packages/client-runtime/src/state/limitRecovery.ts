@@ -1,4 +1,5 @@
-// @effect-diagnostics globalDate:off -- Resume labels use the viewer's local calendar and timezone.
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import type { EnvironmentThreadShell } from "./models.ts";
 
 /** Only a persisted recovery for the current usage-limit stop promises a restart. */
@@ -7,7 +8,7 @@ export function resolveScheduledLimitResume(
     EnvironmentThreadShell,
     "runtime" | "latestRun" | "limitRecovery" | "archivedAt" | "settledOverride" | "snoozedUntil"
   >,
-  now = new Date(),
+  now = DateTime.toDateUtc(DateTime.nowUnsafe()),
 ) {
   const recovery = thread.limitRecovery;
   if (
@@ -20,11 +21,16 @@ export function resolveScheduledLimitResume(
     recovery.resetAt !== thread.runtime.usageLimitResetAt
   )
     return null;
-  const resetMs = Date.parse(recovery.resetAt);
-  if (!Number.isFinite(resetMs)) return null;
-  const snoozeMs = Date.parse(thread.snoozedUntil ?? "");
+  const resetAt = DateTime.make(recovery.resetAt);
+  if (Option.isNone(resetAt)) return null;
+  const resetMs = DateTime.toEpochMillis(resetAt.value);
+  const snoozeAt = DateTime.make(thread.snoozedUntil ?? "");
   // The recovery worker waits for both the usage reset and any later snooze.
-  const reset = new Date(Number.isFinite(snoozeMs) ? Math.max(resetMs, snoozeMs) : resetMs);
+  const reset = DateTime.toDateUtc(
+    DateTime.makeUnsafe(
+      Option.isSome(snoozeAt) ? Math.max(resetMs, DateTime.toEpochMillis(snoozeAt.value)) : resetMs,
+    ),
+  );
   const sameDay =
     reset.getFullYear() === now.getFullYear() &&
     reset.getMonth() === now.getMonth() &&
