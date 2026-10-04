@@ -1752,7 +1752,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     wc: Electron.WebContents,
   ) {
     const scope = yield* Scope.fork(parentScope, "sequential");
-    const mainWindow = yield* Ref.get(mainWindowRef);
     const attachmentId = Symbol();
     let documentId = 0;
     let nextRequestId = 0;
@@ -2095,8 +2094,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               action: "allow",
               overrideBrowserWindowOptions: {
                 ...POPUP_WINDOW_OPTIONS,
-                ...(Option.isSome(mainWindow) && !mainWindow.value.isDestroyed()
-                  ? { parent: mainWindow.value }
+                ...(currentMainWindow && !currentMainWindow.isDestroyed()
+                  ? { parent: currentMainWindow }
                   : {}),
               },
             };

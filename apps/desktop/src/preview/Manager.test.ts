@@ -623,7 +623,14 @@ describe("PreviewManager", () => {
         const preview = makeFaviconWebContents();
         const hostWebContents = {};
         const isDestroyed = vi.fn(() => false);
-        const mainWindow = { isDestroyed, once: vi.fn(), webContents: hostWebContents };
+        let closeMainWindow: (() => void) | undefined;
+        const mainWindow = {
+          isDestroyed,
+          once: vi.fn((event: string, listener: () => void) => {
+            if (event === "closed") closeMainWindow = listener;
+          }),
+          webContents: hostWebContents,
+        };
         Object.assign(preview.webContents, { hostWebContents });
         fromId.mockReturnValue(preview.webContents);
         yield* manager.setMainWindow(mainWindow as never);
@@ -649,6 +656,28 @@ describe("PreviewManager", () => {
         expect(result.overrideBrowserWindowOptions?.modal).not.toBe(true);
 
         isDestroyed.mockReturnValue(true);
+        expect(open(request).overrideBrowserWindowOptions?.parent).toBeUndefined();
+
+        const replacementIsDestroyed = vi.fn(() => false);
+        let closeReplacementWindow: (() => void) | undefined;
+        const replacementWindow = {
+          isDestroyed: replacementIsDestroyed,
+          once: vi.fn((event: string, listener: () => void) => {
+            if (event === "closed") closeReplacementWindow = listener;
+          }),
+          webContents: {},
+        };
+        isDestroyed.mockReturnValue(false);
+        yield* manager.setMainWindow(replacementWindow as never);
+        expect(open(request).overrideBrowserWindowOptions?.parent).toBe(replacementWindow);
+        isDestroyed.mockReturnValue(true);
+        closeMainWindow?.();
+        expect(open(request).overrideBrowserWindowOptions?.parent).toBe(replacementWindow);
+
+        replacementIsDestroyed.mockReturnValue(true);
+        expect(open(request).overrideBrowserWindowOptions?.parent).toBeUndefined();
+        replacementIsDestroyed.mockReturnValue(false);
+        closeReplacementWindow?.();
         expect(open(request).overrideBrowserWindowOptions?.parent).toBeUndefined();
       }),
     ),
