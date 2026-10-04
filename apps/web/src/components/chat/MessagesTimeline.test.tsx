@@ -2594,4 +2594,84 @@ describe("MessagesTimeline", () => {
       await act(() => renderer?.unmount());
     }
   });
+
+  it.each([
+    ["without detail", undefined],
+    ["with detail", "Task result text"],
+  ] as const)("expands a notification only when it has detail: %s", async (_label, detail) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const item = {
+      id: "notification-item-1",
+      threadId: "thread-1",
+      runId: "run-1",
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 0,
+      status: "completed",
+      title: null,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: {},
+      type: "notification",
+      source: { kind: "delegated_task", taskIds: ["task-1"], childThreadId: "child-thread-1" },
+      outcome: "completed",
+      summary: 'Delegated task "Synthetic implementation" finished',
+      ...(detail === undefined ? {} : { detail }),
+    } as const;
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(
+          <MessagesTimeline
+            {...buildProps()}
+            timelineEntries={
+              [
+                {
+                  id: item.id,
+                  kind: "work",
+                  createdAt: MESSAGE_CREATED_AT,
+                  entry: {
+                    id: item.id,
+                    createdAt: MESSAGE_CREATED_AT,
+                    runId: item.runId,
+                    label: item.summary,
+                    tone: "info",
+                    itemType: item.type,
+                    structuredPayload: item,
+                    projectedItem: {
+                      position: 0,
+                      visibility: "local",
+                      sourceThreadId: "thread-1",
+                      sourceItemId: item.id,
+                      item,
+                    },
+                  },
+                },
+              ] as never
+            }
+          />,
+        );
+      });
+      const toggles = renderer!.root.findAll(
+        (node) => node.type === "div" && typeof node.props["aria-expanded"] === "boolean",
+      );
+      if (detail === undefined) {
+        expect(toggles).toHaveLength(0);
+        return;
+      }
+      await act(() => toggles[0]!.props.onClick());
+      expect(
+        renderer!.root.findAll(
+          (node) => node.type === "pre" && node.children.includes("Task result text"),
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
 });

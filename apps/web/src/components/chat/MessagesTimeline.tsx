@@ -4999,10 +4999,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     workEntry.projectedItem?.item.type === "thread_created"
       ? workEntry.projectedItem.item
       : undefined;
-  const notifiedSubagentThreadId =
+  const notification =
     workEntry.projectedItem?.item.type === "notification"
-      ? notificationChildThreadId(workEntry.projectedItem.item.source)
+      ? workEntry.projectedItem.item
       : undefined;
+  const notifiedSubagentThreadId = notification
+    ? notificationChildThreadId(notification.source)
+    : undefined;
   const groupView = use(WorkGroupViewCtx);
   const [expanded, setExpanded] = useState(
     () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
@@ -5151,10 +5154,13 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
             viewedImage ? viewedImagePath : null,
           )
       : null;
+  // The inspector shows only a notification's detail, so one without detail has nothing to expand.
   const canExpandProjectedItem =
     plainOutput !== undefined
       ? Boolean(plainOutput || viewedImage || workEntry.questionAnswer)
-      : canExpand || workEntry.projectedItem !== undefined;
+      : notification
+        ? Boolean(notification.detail?.trim())
+        : canExpand || workEntry.projectedItem !== undefined;
   // Reserve destructive row styling for severe failures, not routine tool errors.
   const iconWrapperClass = cn(
     "flex size-4 items-center justify-center",
