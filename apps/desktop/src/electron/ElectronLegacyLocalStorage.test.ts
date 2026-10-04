@@ -3,11 +3,12 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as PlatformError from "effect/PlatformError";
 import * as TestClock from "effect/testing/TestClock";
 import * as NodeVM from "node:vm";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { destinationSession, sourceSession, makeView, getPath } = vi.hoisted(() => ({
+const { destinationSession, sourceSession, makeView, getPath, fromPath } = vi.hoisted(() => ({
   destinationSession: {
     protocol: { handle: vi.fn(), unhandle: vi.fn() },
     flushStorageData: vi.fn(),
@@ -15,11 +16,12 @@ const { destinationSession, sourceSession, makeView, getPath } = vi.hoisted(() =
   sourceSession: { protocol: { handle: vi.fn(), unhandle: vi.fn() } },
   makeView: vi.fn(),
   getPath: vi.fn(),
+  fromPath: vi.fn<(_path: string) => unknown>(),
 }));
 
 vi.mock("electron", () => ({
   app: { getPath },
-  session: { defaultSession: destinationSession, fromPath: () => sourceSession },
+  session: { defaultSession: destinationSession, fromPath },
   WebContentsView: vi.fn(function (options: { webPreferences: { session: unknown } }) {
     return makeView(options.webPreferences.session);
   }),
@@ -79,7 +81,58 @@ const fixture = Effect.gen(function* () {
 describe("Electron legacy Local Storage lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fromPath.mockReturnValue(sourceSession);
   });
+
+  it.effect("recovers through fresh snapshots when an older snapshot cannot be removed", () =>
+    Effect.gen(function* () {
+      const directory = yield* fixture;
+      const fs = yield* FileSystem.FileSystem;
+      const snapshotRoot = `${directory}/v2/v1-local-storage-import`;
+      const lockedFile = `${snapshotRoot}/Local Storage/leveldb/CURRENT`;
+      yield* fs.makeDirectory(`${snapshotRoot}/Local Storage/leveldb`, { recursive: true });
+      yield* fs.writeFileString(lockedFile, "locked old snapshot");
+      const lockedFs = {
+        ...fs,
+        remove: (target: string, options?: Parameters<typeof fs.remove>[1]) =>
+          target === snapshotRoot
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "remove",
+                  pathOrDescriptor: target,
+                }),
+              )
+            : fs.remove(target, options),
+      };
+      const recovered = stash([{ id: "old", prompt: "V1" }]);
+      const first = view({});
+      makeView.mockImplementation((session) =>
+        session === destinationSession ? first : view({ [stashKey]: recovered }),
+      );
+      yield* importLegacyProfile(directory).pipe(
+        Effect.provideService(FileSystem.FileSystem, lockedFs),
+      );
+      assert.equal(first.localStorage.getItem(stashKey), recovered);
+      assert.equal(first.localStorage.getItem(LEGACY_LOCAL_STORAGE_IMPORT_KEY), "1");
+      assert.equal(yield* fs.readFileString(lockedFile), "locked old snapshot");
+
+      const second = view({});
+      makeView.mockImplementation((session) =>
+        session === destinationSession ? second : view({ [stashKey]: recovered }),
+      );
+      yield* importLegacyProfile(directory).pipe(
+        Effect.provideService(FileSystem.FileSystem, lockedFs),
+      );
+      assert.equal(second.localStorage.getItem(stashKey), recovered);
+      const firstPath = fromPath.mock.calls[0]![0];
+      const secondPath = fromPath.mock.calls[1]![0];
+      assert.notEqual(firstPath, secondPath);
+      assert.isTrue(yield* fs.exists(`${firstPath}/Local Storage/leveldb/CURRENT`));
+      assert.isTrue(yield* fs.exists(`${secondPath}/Local Storage/leveldb/CURRENT`));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   it.effect("finishes a timed-out write and destroys its writer before handing storage to V2", () =>
     Effect.gen(function* () {

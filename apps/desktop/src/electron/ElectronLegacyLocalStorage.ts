@@ -101,9 +101,16 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const snapshot = path.join(Electron.app.getPath("userData"), "v1-local-storage-import");
+  const snapshotRoot = path.join(Electron.app.getPath("userData"), "v1-local-storage-import");
   // Windows can hold the temporary database open until the previous process exits.
-  yield* atStage("cleanup-snapshot", fs.remove(snapshot, { recursive: true, force: true }));
+  yield* atStage(
+    "cleanup-snapshot",
+    fs.remove(snapshotRoot, { recursive: true, force: true }),
+  ).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Could not remove previous V1 import snapshots", error),
+    ),
+  );
   const destinationSession = Electron.session.defaultSession;
   const destinationView = yield* openStorage(destinationSession);
   yield* electronPromise("load-storage", () =>
@@ -121,6 +128,12 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
   }
   if (!source) return;
   const sourcePath = source;
+  yield* atStage("snapshot-profile", fs.makeDirectory(snapshotRoot, { recursive: true }));
+  // Never read a previous attempt's profile, even when its cleanup failed.
+  const snapshot = yield* atStage(
+    "snapshot-profile",
+    fs.makeTempDirectory({ directory: snapshotRoot, prefix: "attempt-" }),
+  );
   const target = path.join(snapshot, "Local Storage", "leveldb");
   yield* atStage("snapshot-profile", fs.makeDirectory(target, { recursive: true }));
   const files = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
