@@ -1,3 +1,4 @@
+import { resolveScheduledLimitResume } from "@t3tools/client-runtime/state/limit-recovery";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
@@ -428,6 +429,7 @@ function SidebarThreadTooltip({
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
 }) {
+  const scheduledResume = resolveScheduledLimitResume(thread);
   const driverKind = providerEntry?.driverKind ?? null;
   const previousProviderNames = thread.providerInstanceHistory
     .filter((instanceId) => instanceId !== modelInstanceId)
@@ -514,6 +516,12 @@ function SidebarThreadTooltip({
             <div className="min-w-0 truncate text-foreground/75">
               {terminalProcessLabel(terminalProcessCount)}
             </div>
+          </div>
+        ) : null}
+        {scheduledResume ? (
+          <div className="flex min-w-0 items-center gap-2 text-warning">
+            <ClockIcon aria-hidden className="size-3 shrink-0" />
+            <span>{scheduledResume.description}</span>
           </div>
         ) : null}
         {thread.runtime?.lastError ? (
@@ -1254,6 +1262,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
+  const scheduledResume = status === "limited" ? resolveScheduledLimitResume(thread) : null;
   const topStatus =
     status === "working"
       ? {
@@ -1285,8 +1294,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               }
             : status === "limited"
               ? {
-                  label: "Limited",
-                  icon: "failed" as const,
+                  label: scheduledResume?.label ?? "Limited",
+                  icon: scheduledResume ? ("scheduled" as const) : ("failed" as const),
                   className: "text-warning",
                 }
               : status === "failed"
@@ -2004,6 +2013,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             <MessageCircleQuestionIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "approval" ? (
                             <ShieldQuestionIcon aria-hidden className="size-4 shrink-0" />
+                          ) : topStatus.icon === "scheduled" ? (
+                            <ClockIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "failed" ? (
                             <CircleAlertIcon aria-hidden className="size-4 shrink-0" />
                           ) : topStatus.icon === "done" ? (

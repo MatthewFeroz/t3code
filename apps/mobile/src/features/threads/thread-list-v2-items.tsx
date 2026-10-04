@@ -1,3 +1,4 @@
+import { resolveScheduledLimitResume } from "@t3tools/client-runtime/state/limit-recovery";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
   THREAD_LIST_V2_MONO_FONT as MONO_FONT,
@@ -587,7 +588,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   // label as the web sidebar, sourced from the server-side visited watermark
   // so checking a thread on any device clears it everywhere.
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
+  const scheduledResume = status === "limited" ? resolveScheduledLimitResume(thread) : null;
   const statusLabel =
+    (scheduledResume
+      ? { label: scheduledResume.label, className: "text-warning-foreground" }
+      : undefined) ??
     STATUS_LABEL_BY_STATUS[status] ??
     (isUnread ? { label: "Done", className: "text-adaptive-emerald-700-300" } : undefined);
   // The timestamp is precomputed on the list item (same stamps the settled
