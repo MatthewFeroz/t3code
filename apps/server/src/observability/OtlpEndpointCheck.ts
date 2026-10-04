@@ -9,7 +9,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { HttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization } from "effect/unstable/observability";
 
 import * as ServerConfig from "../config.ts";
@@ -21,8 +21,9 @@ export class OtlpEndpointCheck extends Context.Service<
   {
     /**
      * Posts an empty export for the signal to `url` from this server, with the
-     * protocol and credentials a saved endpoint would export with. Receivers
-     * accept an empty export without storing anything.
+     * running signal's protocol. Credentials are used only for its exact
+     * running endpoint, and redirects are not followed. Receivers accept an
+     * empty export without storing anything.
      */
     readonly check: (input: OtlpEndpointCheckInput) => Effect.Effect<OtlpEndpointCheckResult>;
   }
@@ -57,13 +58,8 @@ const make = Effect.gen(function* () {
     url,
   }: OtlpEndpointCheckInput) {
     const { url: runningUrl, export: signalExport } = running[signal];
-    // Credentials from an OTEL_EXPORTER_OTLP_* endpoint stay paired with that
-    // endpoint. Every other source shares T3CODE_OTLP_HEADERS, which a saved
-    // endpoint would also export with.
-    const headers =
-      url === runningUrl || config.otelEnvironment[signal]._tag !== "Export"
-        ? signalExport.headers
-        : undefined;
+    // Keep credentials paired with the running endpoint, regardless of source.
+    const headers = url === runningUrl ? signalExport.headers : undefined;
     const body = yield* Effect.gen(function* () {
       const serialization = yield* OtlpSerialization.OtlpSerialization;
       return emptyExport(serialization, signal);
@@ -71,7 +67,11 @@ const make = Effect.gen(function* () {
     const startedAt = yield* Clock.currentTimeMillis;
     const response = yield* httpClient
       .post(url, { body, headers })
-      .pipe(Effect.timeoutOption(CHECK_TIMEOUT), Effect.option);
+      .pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        Effect.timeoutOption(CHECK_TIMEOUT),
+        Effect.option,
+      );
     if (Option.isNone(response)) {
       return { _tag: "Unreachable", timedOut: false } as const;
     }

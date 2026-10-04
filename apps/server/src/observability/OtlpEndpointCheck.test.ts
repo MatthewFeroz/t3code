@@ -1,10 +1,21 @@
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import * as NetAddress from "effect/unstable/net/NetAddress";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientError,
+  HttpClientResponse,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
+import { describe } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as OtlpEndpointCheck from "./OtlpEndpointCheck.ts";
@@ -19,6 +30,7 @@ interface PostedRequest {
 const checkWith = (
   status: number | null,
   overrides: Partial<ServerConfig.ServerConfig["Service"]> = {},
+  httpClientLayer?: Layer.Layer<HttpClient.HttpClient>,
 ) => {
   const requests: Array<PostedRequest> = [];
   const httpClient = HttpClient.make((request) => {
@@ -43,7 +55,7 @@ const checkWith = (
     }),
   ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-otlp-check-" })));
   const layer = OtlpEndpointCheck.layer.pipe(
-    Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+    Layer.provide(httpClientLayer ?? Layer.succeed(HttpClient.HttpClient, httpClient)),
     Layer.provide(configLayer),
     Layer.provide(NodeServices.layer),
   );
@@ -59,6 +71,7 @@ const check = (input: Parameters<OtlpEndpointCheck.OtlpEndpointCheck["Service"][
 describe("OtlpEndpointCheck", () => {
   it.effect("posts an empty export for the signal with the T3 headers", () => {
     const { requests, layer } = checkWith(200, {
+      otlpMetricsUrl: "http://collector:4318/v1/metrics",
       otlpMetricsExport: { ...DEFAULT_SIGNAL_EXPORT, headers: { authorization: "Bearer t3" } },
     });
     return Effect.gen(function* () {
@@ -71,6 +84,84 @@ describe("OtlpEndpointCheck", () => {
       assert.strictEqual(requests[0]?.body, `{"resourceMetrics":[]}`);
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect("keeps T3 credentials paired with each running signal endpoint", () => {
+    const signalExport = { ...DEFAULT_SIGNAL_EXPORT, headers: { "x-api-key": "secret" } };
+    const { requests, layer } = checkWith(200, {
+      otlpTracesUrl: "https://collector.example.com/v1/traces",
+      otlpMetricsUrl: "https://collector.example.com/v1/metrics",
+      otlpLogsUrl: "https://collector.example.com/v1/logs",
+      otlpTracesExport: signalExport,
+      otlpMetricsExport: signalExport,
+      otlpLogsExport: signalExport,
+      otelEnvironment: OtelEnvironment.none,
+    });
+    return Effect.gen(function* () {
+      for (const signal of ["traces", "metrics", "logs"] as const) {
+        const runningUrl = `https://collector.example.com/v1/${signal}`;
+        yield* check({ signal, url: runningUrl });
+        yield* check({ signal, url: "https://elsewhere.example.com/collect" });
+        yield* check({ signal, url: `${runningUrl}/other` });
+        yield* check({ signal, url: `${runningUrl}?tenant=other` });
+      }
+
+      assert.lengthOf(requests, 12);
+      requests.forEach((request, index) => {
+        if (index % 4 === 0) assert.strictEqual(request.headers["x-api-key"], "secret");
+        else assert.isUndefined(request.headers["x-api-key"]);
+      });
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("does not send export credentials when the signal has no running endpoint", () => {
+    const { requests, layer } = checkWith(200, {
+      otlpLogsUrl: undefined,
+      otlpLogsExport: { ...DEFAULT_SIGNAL_EXPORT, headers: { authorization: "Bearer t3" } },
+      otelEnvironment: OtelEnvironment.none,
+    });
+    return Effect.gen(function* () {
+      const result = yield* check({ signal: "logs", url: "https://new.example.com/v1/logs" });
+
+      assert.strictEqual(result._tag, "Accepted");
+      assert.lengthOf(requests, 1);
+      assert.isUndefined(requests[0]?.headers.authorization);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("does not forward credentials through a receiver redirect", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const requests: Array<{ url: string; apiKey: string | undefined }> = [];
+        const server = yield* HttpServer.HttpServer;
+        yield* server.serve(
+          Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            yield* request.text;
+            requests.push({ url: request.url, apiKey: request.headers["x-api-key"] });
+            return request.url === "/v1/traces"
+              ? HttpServerResponse.redirect("/other", { status: 307 })
+              : HttpServerResponse.empty({ status: 200 });
+          }),
+        );
+        if (!NetAddress.isInetAddress(server.address)) {
+          return yield* Effect.die(new Error("Expected a TCP address"));
+        }
+        const url = `http://127.0.0.1:${server.address.port}/v1/traces`;
+        const { layer } = checkWith(
+          200,
+          {
+            otlpTracesUrl: url,
+            otlpTracesExport: { ...DEFAULT_SIGNAL_EXPORT, headers: { "x-api-key": "secret" } },
+          },
+          FetchHttpClient.layer,
+        );
+        const result = yield* check({ signal: "traces", url }).pipe(Effect.provide(layer));
+
+        assert.deepStrictEqual(result, { _tag: "Rejected", status: 307 });
+        assert.deepStrictEqual(requests, [{ url: "/v1/traces", apiKey: "secret" }]);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
 
   it.effect("reports the status a receiver rejects the export with", () => {
     const { layer } = checkWith(401);
