@@ -36,7 +36,7 @@ describe("scheduled usage-limit resume", () => {
       hour: "numeric",
       minute: "2-digit",
     });
-    expect(resolveScheduledLimitResume(thread, now)?.label).toBe(`Resumes at ${time}`);
+    expect(resolveScheduledLimitResume(thread, now)?.label).toBe(time);
     expect(resolveScheduledLimitResume(thread, new Date(2026, 9, 3, 1))?.label).toContain("Oct 4");
     expect(resolveScheduledLimitResume(thread, now)?.description).toContain(
       "Automatically resumes",

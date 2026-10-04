@@ -1296,7 +1296,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ? {
                   label: scheduledResume?.label ?? "Limited",
                   icon: scheduledResume ? ("scheduled" as const) : ("failed" as const),
-                  className: "text-warning",
+                  className: scheduledResume ? "text-muted-foreground" : "text-warning",
                 }
               : status === "failed"
                 ? {
@@ -1602,7 +1602,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const accessibility = resolveSidebarRowAccessibility({
     title: thread.title,
-    statusLabel: topStatus?.label ?? null,
+    statusLabel: scheduledResume?.accessibilityLabel ?? topStatus?.label ?? null,
     projectDisplayName: props.projectDisplayName,
     isActive: props.isActive,
   });
@@ -1994,7 +1994,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                                 )}
                               >
                                 <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
-                                <span role="status">{topStatus.label}</span>
+                                <span
+                                  role="status"
+                                  aria-label={scheduledResume?.accessibilityLabel}
+                                >
+                                  {topStatus.label}
+                                </span>
                               </button>
                             }
                           />
@@ -2023,7 +2028,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
-                          <span role="status">{topStatus.label}</span>
+                          <span role="status" aria-label={scheduledResume?.accessibilityLabel}>
+                            {topStatus.label}
+                          </span>
                           {status === "working" ? (
                             <span aria-hidden>
                               <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />

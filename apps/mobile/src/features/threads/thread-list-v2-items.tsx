@@ -591,7 +591,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const scheduledResume = status === "limited" ? resolveScheduledLimitResume(thread) : null;
   const statusLabel =
     (scheduledResume
-      ? { label: scheduledResume.label, className: "text-warning-foreground" }
+      ? { label: scheduledResume.label, className: rowAppearance.tertiaryForegroundClassName }
       : undefined) ??
     STATUS_LABEL_BY_STATUS[status] ??
     (isUnread ? { label: "Done", className: "text-adaptive-emerald-700-300" } : undefined);
@@ -957,7 +957,16 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             type="monochrome"
           />
         ) : null}
+        {scheduledResume ? (
+          <SymbolView
+            name="clock"
+            size={12}
+            tintColorClassName={rowAppearance.mutedIconTintClassName}
+            type="monochrome"
+          />
+        ) : null}
         <Text
+          accessibilityLabel={scheduledResume?.description}
           className={cn(
             "text-xs tabular-nums",
             statusLabel?.className ??

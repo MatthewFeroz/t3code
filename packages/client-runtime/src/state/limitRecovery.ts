@@ -33,7 +33,8 @@ export function resolveScheduledLimitResume(
     ...(reset.getFullYear() !== now.getFullYear() ? { year: "numeric" as const } : {}),
   });
   return {
-    label: sameDay ? `Resumes at ${time}` : `Resumes ${date}, ${time}`,
+    label: sameDay ? time : `${date}, ${time}`,
+    accessibilityLabel: sameDay ? `Resumes at ${time}` : `Resumes ${date}, ${time}`,
     description: `Automatically resumes when usage resets at ${reset.toLocaleString(undefined, { timeZoneName: "short" })}`,
   };
 }
