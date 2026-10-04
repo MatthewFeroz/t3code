@@ -66,24 +66,28 @@ const makeView = (session: Electron.Session) =>
   new Electron.WebContentsView({
     webPreferences: { session, sandbox: true, contextIsolation: true },
   });
+const closeView = (view: Electron.WebContentsView) =>
+  new Promise<void>((resolve) => {
+    if (view.webContents.isDestroyed()) return resolve();
+    view.webContents.once("destroyed", resolve);
+    view.webContents.close({ waitForBeforeUnload: false });
+  });
 const openStorage = (session: Electron.Session) =>
   Effect.acquireRelease(
-    Effect.try({
-      try: () => {
-        const view = makeView(session);
-        try {
-          session.protocol.handle("t3code", blankPage);
-          return view;
-        } catch (cause) {
-          view.webContents.close();
-          throw cause;
-        }
-      },
-      catch: stageFailure("open-storage"),
+    electronPromise("open-storage", async () => {
+      const view = makeView(session);
+      try {
+        session.protocol.handle("t3code", blankPage);
+        return view;
+      } catch (cause) {
+        await closeView(view);
+        throw cause;
+      }
     }),
     (view) =>
-      Effect.sync(() => {
-        view.webContents.close();
+      Effect.promise(async () => {
+        // Startup must not reuse this session while an importer renderer is alive.
+        await closeView(view);
         session.protocol.unhandle("t3code");
       }),
   );
@@ -168,14 +172,31 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
     },
     entries,
   );
-  yield* electronPromise("write-storage", () =>
-    destinationView.webContents.executeJavaScript(`
-    for (const [key, value] of ${encodeWrites(writes)}) localStorage.setItem(key, value);
+  // Finish the write/rollback and flush before timeout cleanup closes its renderer.
+  yield* Effect.gen(function* () {
+    yield* electronPromise("write-storage", () =>
+      destinationView.webContents.executeJavaScript(`
+    const written = [];
+    try {
+      for (const [key, value] of ${encodeWrites(writes)}) {
+        const previous = localStorage.getItem(key);
+        localStorage.setItem(key, value);
+        written.push([key, previous]);
+      }
+    } catch (error) {
+      // Reverse successful writes so a retry cannot resurrect partially exposed data.
+      for (const [key, previous] of written.reverse()) {
+        if (previous === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, previous);
+      }
+      throw error;
+    }
     true;
   `),
-  );
-  yield* Effect.try({
-    try: () => destinationSession.flushStorageData(),
-    catch: stageFailure("flush-storage"),
-  });
+    );
+    yield* Effect.try({
+      try: () => destinationSession.flushStorageData(),
+      catch: stageFailure("flush-storage"),
+    });
+  }).pipe(Effect.uninterruptible);
 }, Effect.scoped);
