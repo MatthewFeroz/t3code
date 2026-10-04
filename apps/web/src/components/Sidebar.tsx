@@ -1819,7 +1819,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     !isWoke && "group-hover/sidebar-row:opacity-0",
                   )}
                 >
-                  {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
+                  {scheduledResume ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <ClockIcon aria-hidden className="size-4 shrink-0" />
+                      <span role="status" aria-label={scheduledResume.accessibilityLabel}>
+                        {scheduledResume.label}
+                      </span>
+                    </span>
+                  ) : variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                     // Snoozed rows show when they come BACK, not when they were
                     // last touched — the return ticket is the row's whole story.
                     <span className="text-xs text-info-foreground tabular-nums">
