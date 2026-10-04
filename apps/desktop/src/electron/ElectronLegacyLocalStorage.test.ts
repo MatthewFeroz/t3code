@@ -233,6 +233,36 @@ describe("Electron legacy Local Storage lifecycle", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("continues rollback after a restoration fails and preserves the import error", () =>
+    Effect.gen(function* () {
+      const directory = yield* fixture;
+      const original = stash([{ id: "current", prompt: "V2" }]);
+      const destination = view({ [stashKey]: original });
+      const source = view({
+        "t3code:theme": "dark",
+        [stashKey]: stash([{ id: "old", prompt: "V1" }]),
+      });
+      makeView.mockImplementation((session) =>
+        session === destinationSession ? destination : source,
+      );
+      const writeError = new Error("marker quota");
+      destination.localStorage.setItem.mockImplementation((key: string, value: string) => {
+        if (key === LEGACY_LOCAL_STORAGE_IMPORT_KEY) throw writeError;
+        if (key === stashKey && value === original) throw new Error("rollback quota");
+        destination.localStorage[key] = value;
+      });
+      const error = yield* importLegacyProfile(directory).pipe(Effect.flip);
+      assert.isNull(destination.localStorage.getItem("t3code:theme"));
+      assert.isNull(destination.localStorage.getItem(LEGACY_LOCAL_STORAGE_IMPORT_KEY));
+      assert.equal(error._tag, "LegacyLocalStorageImportError");
+      if (error._tag === "LegacyLocalStorageImportError") {
+        assert.strictEqual(error.cause, writeError);
+      }
+      // A failed restoration can still leave this key partially imported.
+      assert.notEqual(destination.localStorage.getItem(stashKey), original);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rolls back newly recovered content when the completion marker cannot be written", () =>
     Effect.gen(function* () {
       const directory = yield* fixture;

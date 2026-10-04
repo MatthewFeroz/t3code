@@ -199,8 +199,12 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
     } catch (error) {
       // Reverse successful writes so a retry cannot resurrect partially exposed data.
       for (const [key, previous] of written.reverse()) {
-        if (previous === null) localStorage.removeItem(key);
-        else localStorage.setItem(key, previous);
+        try {
+          if (previous === null) localStorage.removeItem(key);
+          else localStorage.setItem(key, previous);
+        } catch {
+          // Attempt the remaining keys and preserve the original write error.
+        }
       }
       throw error;
     }
