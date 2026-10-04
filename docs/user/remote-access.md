@@ -131,8 +131,7 @@ In the desktop app, open **Settings → Connections → Add environment**, choos
 or reuses a server there and opens the port forward for you. Projects, provider
 credentials, and agent work stay on the remote machine.
 
-The remote host must be Linux (x64 or arm64) or an Apple Silicon Mac (arm64) with
-`curl` or `wget`,
+The remote host must be Linux or an Apple Silicon Mac with `curl` or `wget`,
 `tar`, `sha256sum` or `shasum`, and [provider setup](./install.md#providers).
 The first launch downloads T3 Code's server to `~/.t3/runtime` on the host, so
 it takes longer than later ones.
@@ -163,7 +162,14 @@ expires.
 To remove an environment from T3 Connect, open your account menu's **T3 Connect**
 page, or **Settings → T3 Connect** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
-offline or has been wiped.
+offline or has been wiped. Removing an environment from a device's connection
+settings only forgets it on that device; it stays registered to your account.
+
+When idle tunnel cleanup is enabled, T3 Connect removes a linked environment's
+tunnel after it stays offline for several minutes. The environment stays linked
+and keeps the same address. When the host starts again or wakes, T3 Connect
+creates a replacement tunnel on its own. You do not need to pair again. Cleanup
+usually runs five to ten minutes after the tunnel goes down.
 
 On a command-line host, `t3 connect unlink` disables exposure while retaining
 your login; `t3 connect logout` also clears that login. Background-service
