@@ -319,9 +319,12 @@ const startup = Effect.gen(function* () {
   yield* logStartupInfo("app ready");
   if (!environment.isDevelopment) {
     yield* ElectronLegacyLocalStorage.importLegacyProfile(environment.appDataDirectory).pipe(
-      Effect.timeout(Duration.seconds(10)),
-      Effect.catch((error) =>
-        Effect.logWarning("V1 Local Storage import will retry next launch", error),
+      Effect.catchCause((cause) =>
+        Cause.hasDies(cause)
+          ? fatalStartupCause("legacy storage teardown", cause)
+          : Cause.hasInterrupts(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("V1 Local Storage import did not complete", Cause.pretty(cause)),
       ),
     );
   }

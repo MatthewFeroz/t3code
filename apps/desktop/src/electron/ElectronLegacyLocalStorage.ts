@@ -67,134 +67,148 @@ const makeView = (session: Electron.Session) =>
   new Electron.WebContentsView({
     webPreferences: { session, sandbox: true, contextIsolation: true },
   });
+const waitForClose = (view: Electron.WebContentsView, force: boolean) =>
+  Effect.callback<void>((resume) => {
+    if (view.webContents.isDestroyed()) return resume(Effect.void);
+    const destroyed = () => resume(Effect.void);
+    view.webContents.once("destroyed", destroyed);
+    if (force && view.webContents.getOSProcessId() > 0) {
+      view.webContents.forcefullyCrashRenderer();
+    }
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.close({ waitForBeforeUnload: false });
+    }
+    return Effect.sync(() => view.webContents.removeListener("destroyed", destroyed));
+  }).pipe(Effect.interruptible);
 const closeView = (view: Electron.WebContentsView) =>
-  new Promise<void>((resolve) => {
-    if (view.webContents.isDestroyed()) return resolve();
-    view.webContents.once("destroyed", resolve);
-    view.webContents.close({ waitForBeforeUnload: false });
-  });
+  waitForClose(view, false).pipe(
+    Effect.timeout("1 second"),
+    Effect.catchTag("TimeoutError", () =>
+      waitForClose(view, true).pipe(
+        Effect.timeout("1 second"),
+        // If even forced teardown fails, fail startup rather than reuse an active writer.
+        Effect.orDie,
+      ),
+    ),
+  );
 const openStorage = (session: Electron.Session) =>
   Effect.acquireRelease(
-    electronPromise("open-storage", async () => {
-      const view = makeView(session);
-      try {
-        session.protocol.handle("t3code", blankPage);
-        return view;
-      } catch (cause) {
-        await closeView(view);
-        throw cause;
-      }
+    Effect.gen(function* () {
+      const view = yield* Effect.try({
+        try: () => makeView(session),
+        catch: stageFailure("open-storage"),
+      });
+      yield* Effect.try({
+        try: () => session.protocol.handle("t3code", blankPage),
+        catch: stageFailure("open-storage"),
+      }).pipe(Effect.onError(() => closeView(view)));
+      return view;
     }),
     (view) =>
-      Effect.promise(async () => {
-        // Startup must not reuse this session while an importer renderer is alive.
-        await closeView(view);
-        session.protocol.unhandle("t3code");
-      }),
+      closeView(view).pipe(Effect.andThen(Effect.sync(() => session.protocol.unhandle("t3code")))),
   );
 const encodeWrites = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(Schema.Tuple([Schema.String, Schema.String]))),
 );
 
 /** Run before registering the real renderer protocol or creating any app windows. */
-export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(function* (
-  appDataDirectory: string,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  const crypto = yield* Crypto.Crypto;
-  const path = yield* Path.Path;
-  const snapshotRoot = path.join(Electron.app.getPath("userData"), "v1-local-storage-import");
-  // Windows can hold the temporary database open until the previous process exits.
-  yield* atStage(
-    "cleanup-snapshot",
-    fs.remove(snapshotRoot, { recursive: true, force: true }),
-  ).pipe(
-    Effect.catch((error) =>
-      Effect.logWarning("Could not remove previous V1 import snapshots", error),
-    ),
-  );
-  const destinationSession = Electron.session.defaultSession;
-  const destinationView = yield* openStorage(destinationSession);
-  yield* electronPromise("load-storage", () =>
-    destinationView.webContents.loadURL("t3code://app/"),
-  );
-  const current = new Map(yield* readStorage(destinationView));
-  if (current.has(LEGACY_LOCAL_STORAGE_IMPORT_KEY)) return;
-  let source: string | undefined;
-  for (const name of ["t3code", "T3 Code (Alpha)"]) {
-    const candidate = path.join(appDataDirectory, name, "Local Storage", "leveldb");
-    if (yield* atStage("discover-profile", fs.exists(path.join(candidate, "CURRENT")))) {
-      source = candidate;
-      break;
-    }
-  }
-  if (!source) return;
-  const sourcePath = source;
-  yield* atStage("snapshot-profile", fs.makeDirectory(snapshotRoot, { recursive: true }));
-  // Never read a previous attempt's profile, even when its cleanup failed.
-  const snapshot = yield* atStage(
-    "snapshot-profile",
-    fs.makeTempDirectory({ directory: snapshotRoot, prefix: "attempt-" }),
-  );
-  const target = path.join(snapshot, "Local Storage", "leveldb");
-  yield* atStage("snapshot-profile", fs.makeDirectory(target, { recursive: true }));
-  const files = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
-    .filter((name) => name !== "LOCK")
-    .sort();
-  const fingerprint = (filePath: string) =>
-    fs.readFile(filePath).pipe(
-      Effect.flatMap((bytes) => crypto.digest("SHA-256", bytes)),
-      Effect.map(Encoding.encodeHex),
-    );
-  const before = yield* atStage(
-    "snapshot-profile",
-    Effect.forEach(files, (name) => fingerprint(path.join(sourcePath, name))),
-  );
-  for (const name of files)
+export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(
+  function* (appDataDirectory: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const crypto = yield* Crypto.Crypto;
+    const path = yield* Path.Path;
+    const snapshotRoot = path.join(Electron.app.getPath("userData"), "v1-local-storage-import");
+    // Windows can hold the temporary database open until the previous process exits.
     yield* atStage(
-      "snapshot-profile",
-      fs.copyFile(path.join(sourcePath, name), path.join(target, name)),
+      "cleanup-snapshot",
+      fs.remove(snapshotRoot, { recursive: true, force: true }),
+    ).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not remove previous V1 import snapshots", error),
+      ),
     );
-  const afterFiles = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
-    .filter((name) => name !== "LOCK")
-    .sort();
-  const after = yield* atStage(
-    "snapshot-profile",
-    Effect.forEach(files, (name) => fingerprint(path.join(sourcePath, name))),
-  );
-  const copied = yield* atStage(
-    "snapshot-profile",
-    Effect.forEach(files, (name) => fingerprint(path.join(target, name))),
-  );
-  // Never acknowledge a snapshot that V1 wrote or compacted while we copied it.
-  if (
-    files.join("\n") !== afterFiles.join("\n") ||
-    before.some((digest, index) => digest !== after[index] || digest !== copied[index])
-  ) {
-    return yield* new LegacyLocalStorageSnapshotChangedError({});
-  }
-  const sourceSession = yield* Effect.try({
-    try: () => Electron.session.fromPath(snapshot),
-    catch: stageFailure("open-storage"),
-  });
-  const sourceView = yield* openStorage(sourceSession);
-  yield* electronPromise("load-storage", () => sourceView.webContents.loadURL("t3code://app/"));
-  const entries = yield* readStorage(sourceView);
-  const writes: Array<[string, string]> = [];
-  importLegacyLocalStorage(
-    {
-      getItem: (key) => current.get(key) ?? null,
-      setItem: (key, value) => {
-        current.set(key, value);
-        writes.push([key, value]);
+    const destinationSession = Electron.session.defaultSession;
+    const destinationView = yield* openStorage(destinationSession);
+    yield* electronPromise("load-storage", () =>
+      destinationView.webContents.loadURL("t3code://app/"),
+    );
+    const current = new Map(yield* readStorage(destinationView));
+    if (current.has(LEGACY_LOCAL_STORAGE_IMPORT_KEY)) return;
+    let source: string | undefined;
+    for (const name of ["t3code", "T3 Code (Alpha)"]) {
+      const candidate = path.join(appDataDirectory, name, "Local Storage", "leveldb");
+      if (yield* atStage("discover-profile", fs.exists(path.join(candidate, "CURRENT")))) {
+        source = candidate;
+        break;
+      }
+    }
+    if (!source) return;
+    const sourcePath = source;
+    yield* atStage("snapshot-profile", fs.makeDirectory(snapshotRoot, { recursive: true }));
+    // Never read a previous attempt's profile, even when its cleanup failed.
+    const snapshot = yield* atStage(
+      "snapshot-profile",
+      fs.makeTempDirectory({ directory: snapshotRoot, prefix: "attempt-" }),
+    );
+    const target = path.join(snapshot, "Local Storage", "leveldb");
+    yield* atStage("snapshot-profile", fs.makeDirectory(target, { recursive: true }));
+    const files = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
+      .filter((name) => name !== "LOCK")
+      .sort();
+    const fingerprint = (filePath: string) =>
+      fs.readFile(filePath).pipe(
+        Effect.flatMap((bytes) => crypto.digest("SHA-256", bytes)),
+        Effect.map(Encoding.encodeHex),
+      );
+    const before = yield* atStage(
+      "snapshot-profile",
+      Effect.forEach(files, (name) => fingerprint(path.join(sourcePath, name))),
+    );
+    for (const name of files)
+      yield* atStage(
+        "snapshot-profile",
+        fs.copyFile(path.join(sourcePath, name), path.join(target, name)),
+      );
+    const afterFiles = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
+      .filter((name) => name !== "LOCK")
+      .sort();
+    const after = yield* atStage(
+      "snapshot-profile",
+      Effect.forEach(files, (name) => fingerprint(path.join(sourcePath, name))),
+    );
+    const copied = yield* atStage(
+      "snapshot-profile",
+      Effect.forEach(files, (name) => fingerprint(path.join(target, name))),
+    );
+    // Never acknowledge a snapshot that V1 wrote or compacted while we copied it.
+    if (
+      files.join("\n") !== afterFiles.join("\n") ||
+      before.some((digest, index) => digest !== after[index] || digest !== copied[index])
+    ) {
+      return yield* new LegacyLocalStorageSnapshotChangedError({});
+    }
+    const sourceSession = yield* Effect.try({
+      try: () => Electron.session.fromPath(snapshot),
+      catch: stageFailure("open-storage"),
+    });
+    const sourceView = yield* openStorage(sourceSession);
+    yield* electronPromise("load-storage", () => sourceView.webContents.loadURL("t3code://app/"));
+    const entries = yield* readStorage(sourceView);
+    const writes: Array<[string, string]> = [];
+    importLegacyLocalStorage(
+      {
+        getItem: (key) => current.get(key) ?? null,
+        setItem: (key, value) => {
+          current.set(key, value);
+          writes.push([key, value]);
+        },
       },
-    },
-    entries,
-  );
-  // Finish the write/rollback and flush before timeout cleanup closes its renderer.
-  yield* Effect.gen(function* () {
-    yield* electronPromise("write-storage", () =>
-      destinationView.webContents.executeJavaScript(`
+      entries,
+    );
+    // Timeout cleanup stops the writer before startup can reuse its storage session.
+    yield* Effect.gen(function* () {
+      yield* electronPromise("write-storage", () =>
+        destinationView.webContents.executeJavaScript(`
     const written = [];
     try {
       for (const [key, value] of ${encodeWrites(writes)}) {
@@ -216,10 +230,12 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
     }
     true;
   `),
-    );
-    yield* Effect.try({
-      try: () => destinationSession.flushStorageData(),
-      catch: stageFailure("flush-storage"),
+      );
+      yield* Effect.try({
+        try: () => destinationSession.flushStorageData(),
+        catch: stageFailure("flush-storage"),
+      });
     });
-  }).pipe(Effect.uninterruptible);
-}, Effect.scoped);
+  },
+  (effect) => effect.pipe(Effect.timeout("10 seconds"), Effect.scoped),
+);

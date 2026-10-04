@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -60,6 +61,12 @@ function view(values: Record<string, string>) {
     once: (_event: string, listener: () => void) => {
       listeners.push(listener);
     },
+    removeListener: (_event: string, listener: () => void) => {
+      const index = listeners.indexOf(listener);
+      if (index >= 0) listeners.splice(index, 1);
+    },
+    getOSProcessId: () => (destroyed ? 0 : 1),
+    forcefullyCrashRenderer: vi.fn(destroy),
     close: vi.fn(destroy),
     loadURL: vi.fn(async () => {}),
     executeJavaScript: vi.fn(async (script: string): Promise<unknown> =>
@@ -169,7 +176,7 @@ describe("Electron legacy Local Storage lifecycle", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("finishes a timed-out write and destroys its writer before handing storage to V2", () =>
+  it.effect("interrupts a stalled write and destroys its writer before handing storage to V2", () =>
     Effect.gen(function* () {
       const directory = yield* fixture;
       const destination = view({});
@@ -193,7 +200,6 @@ describe("Electron legacy Local Storage lifecycle", () => {
       });
       let openedV2 = false;
       const startup = yield* importLegacyProfile(directory).pipe(
-        Effect.timeout("10 seconds"),
         Effect.ignore,
         Effect.andThen(
           Effect.sync(() => {
@@ -205,17 +211,113 @@ describe("Electron legacy Local Storage lifecycle", () => {
       yield* Effect.promise(() => writing.promise);
       yield* TestClock.adjust("10 seconds");
       assert.isFalse(openedV2);
-      assert.equal(destination.webContents.close.mock.calls.length, 0);
-      writeResult.resolve(true);
+      const closeCallsAtDeadline = destination.webContents.close.mock.calls.length;
+      // Let the original implementation finish if this regression fails.
+      if (closeCallsAtDeadline === 0) {
+        writeResult.resolve(true);
+        destination.destroy();
+      }
+      assert.equal(closeCallsAtDeadline, 1);
       yield* Effect.promise(() => closed.promise);
       assert.isFalse(openedV2);
-      assert.equal(destinationSession.flushStorageData.mock.calls.length, 1);
+      assert.equal(destinationSession.flushStorageData.mock.calls.length, 0);
       assert.equal(destinationSession.protocol.unhandle.mock.calls.length, 0);
       destination.destroy();
       yield* Fiber.join(startup);
       assert.isTrue(openedV2);
       assert.equal(destinationSession.protocol.unhandle.mock.calls.length, 1);
+      writeResult.resolve(true);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("destroys a stalled writer when startup is interrupted", () =>
+    Effect.gen(function* () {
+      const directory = yield* fixture;
+      const destination = view({});
+      makeView.mockImplementation((session) =>
+        session === destinationSession
+          ? destination
+          : view({ [stashKey]: stash([{ id: "old", prompt: "V1" }]) }),
+      );
+      const writing = Promise.withResolvers<void>();
+      const writeResult = Promise.withResolvers<unknown>();
+      const execute = destination.webContents.executeJavaScript.getMockImplementation()!;
+      destination.webContents.executeJavaScript.mockImplementation((script) => {
+        if (script.includes("localStorage.setItem")) {
+          writing.resolve();
+          return writeResult.promise;
+        }
+        return execute(script);
+      });
+      const startup = yield* importLegacyProfile(directory).pipe(Effect.forkChild);
+      yield* Effect.promise(() => writing.promise);
+      yield* Fiber.interrupt(startup);
+      assert.isTrue(destination.webContents.isDestroyed());
+      assert.equal(destinationSession.protocol.unhandle.mock.calls.length, 1);
+      assert.equal(destinationSession.flushStorageData.mock.calls.length, 0);
+      writeResult.resolve(true);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.each(["destroyed", "stuck"] as const)(
+    "forces a stalled writer closed and handles a %s teardown",
+    (teardown) =>
+      Effect.gen(function* () {
+        const directory = yield* fixture;
+        const destination = view({});
+        makeView.mockImplementation((session) =>
+          session === destinationSession
+            ? destination
+            : view({ [stashKey]: stash([{ id: "old", prompt: "V1" }]) }),
+        );
+        const writing = Promise.withResolvers<void>();
+        const closing = Promise.withResolvers<void>();
+        const writeResult = Promise.withResolvers<unknown>();
+        const execute = destination.webContents.executeJavaScript.getMockImplementation()!;
+        destination.webContents.executeJavaScript.mockImplementation((script) => {
+          if (script.includes("localStorage.setItem")) {
+            writing.resolve();
+            return writeResult.promise;
+          }
+          return execute(script);
+        });
+        destination.webContents.close.mockImplementation(() => closing.resolve());
+        if (teardown === "stuck") {
+          destination.webContents.forcefullyCrashRenderer.mockImplementation(() => {});
+        }
+        let openedV2 = false;
+        const startup = yield* importLegacyProfile(directory).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasDies(cause) || Cause.hasInterrupts(cause)
+              ? Effect.failCause(cause)
+              : Effect.void,
+          ),
+          Effect.andThen(
+            Effect.sync(() => {
+              openedV2 = true;
+            }),
+          ),
+          Effect.exit,
+          Effect.forkChild,
+        );
+        yield* Effect.promise(() => writing.promise);
+        yield* TestClock.adjust("10 seconds");
+        yield* Effect.promise(() => closing.promise);
+        assert.isFalse(openedV2);
+        yield* TestClock.adjust("1 second");
+        assert.equal(destination.webContents.forcefullyCrashRenderer.mock.calls.length, 1);
+        if (teardown === "stuck") yield* TestClock.adjust("1 second");
+        const result = yield* Fiber.join(startup);
+        assert.equal(result._tag, teardown === "destroyed" ? "Success" : "Failure");
+        assert.equal(openedV2, teardown === "destroyed");
+        assert.equal(
+          destinationSession.protocol.unhandle.mock.calls.length,
+          teardown === "destroyed" ? 1 : 0,
+        );
+        assert.equal(destinationSession.flushStorageData.mock.calls.length, 0);
+        destination.destroy();
+        writeResult.resolve(true);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect(
