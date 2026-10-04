@@ -1,7 +1,8 @@
 import * as Electron from "electron";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -100,6 +101,7 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
   appDataDirectory: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
+  const crypto = yield* Crypto.Crypto;
   const path = yield* Path.Path;
   const snapshotRoot = path.join(Electron.app.getPath("userData"), "v1-local-storage-import");
   // Windows can hold the temporary database open until the previous process exits.
@@ -139,9 +141,14 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
   const files = (yield* atStage("snapshot-profile", fs.readDirectory(sourcePath)))
     .filter((name) => name !== "LOCK")
     .sort();
+  const fingerprint = (filePath: string) =>
+    fs.readFile(filePath).pipe(
+      Effect.flatMap((bytes) => crypto.digest("SHA-256", bytes)),
+      Effect.map(Encoding.encodeHex),
+    );
   const before = yield* atStage(
     "snapshot-profile",
-    Effect.forEach(files, (name) => fs.stat(path.join(sourcePath, name))),
+    Effect.forEach(files, (name) => fingerprint(path.join(sourcePath, name))),
   );
   for (const name of files)
     yield* atStage(
@@ -153,17 +160,16 @@ export const importLegacyProfile = Effect.fn("desktop.importLegacyProfile")(func
     .sort();
   const after = yield* atStage(
     "snapshot-profile",
-    Effect.forEach(files, (name) => fs.stat(path.join(sourcePath, name))),
+    Effect.forEach(files, (name) => fingerprint(path.join(sourcePath, name))),
+  );
+  const copied = yield* atStage(
+    "snapshot-profile",
+    Effect.forEach(files, (name) => fingerprint(path.join(target, name))),
   );
   // Never acknowledge a snapshot that V1 wrote or compacted while we copied it.
   if (
     files.join("\n") !== afterFiles.join("\n") ||
-    before.some(
-      (stat, index) =>
-        stat.size !== after[index]?.size ||
-        Option.getOrNull(stat.mtime)?.getTime() !==
-          Option.getOrNull(after[index]!.mtime)?.getTime(),
-    )
+    before.some((digest, index) => digest !== after[index] || digest !== copied[index])
   ) {
     return yield* new LegacyLocalStorageSnapshotChangedError({});
   }

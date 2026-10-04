@@ -84,6 +84,41 @@ describe("Electron legacy Local Storage lifecycle", () => {
     fromPath.mockReturnValue(sourceSession);
   });
 
+  it.effect.each(["source", "snapshot"] as const)(
+    "rejects a same-size %s rewrite with an unchanged timestamp",
+    (changed) =>
+      Effect.gen(function* () {
+        const directory = yield* fixture;
+        const fs = yield* FileSystem.FileSystem;
+        const mtime = 1_577_836_800;
+        yield* fs.utimes(`${directory}/t3code/Local Storage/leveldb/CURRENT`, mtime, mtime);
+        const destination = view({});
+        makeView.mockImplementation((session) =>
+          session === destinationSession
+            ? destination
+            : view({ [stashKey]: stash([{ id: "old", prompt: "V1" }]) }),
+        );
+        const changingFs = {
+          ...fs,
+          copyFile: (source: string, target: string) =>
+            Effect.gen(function* () {
+              yield* fs.copyFile(source, target);
+              const rewritten = changed === "source" ? source : target;
+              yield* fs.writeFileString(rewritten, "mutated");
+              yield* fs.utimes(rewritten, mtime, mtime);
+            }),
+        };
+        const error = yield* importLegacyProfile(directory).pipe(
+          Effect.provideService(FileSystem.FileSystem, changingFs),
+          Effect.flip,
+        );
+        assert.equal(error._tag, "LegacyLocalStorageSnapshotChangedError");
+        assert.isNull(destination.localStorage.getItem(stashKey));
+        assert.isNull(destination.localStorage.getItem(LEGACY_LOCAL_STORAGE_IMPORT_KEY));
+        assert.equal(fromPath.mock.calls.length, 0);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("recovers through fresh snapshots when an older snapshot cannot be removed", () =>
     Effect.gen(function* () {
       const directory = yield* fixture;
