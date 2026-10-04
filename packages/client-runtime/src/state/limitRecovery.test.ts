@@ -47,7 +47,8 @@ describe("scheduled usage-limit resume", () => {
       minute: "2-digit",
     });
     expect(resolveScheduledLimitResume(thread, now)?.label).toBe(time);
-    expect(resolveScheduledLimitResume(thread, localDate(3, 1))?.label).toContain("Oct 4");
+    const date = localDate(4, 4).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    expect(resolveScheduledLimitResume(thread, localDate(3, 1))?.label).toBe(`${date}, ${time}`);
     expect(resolveScheduledLimitResume(thread, now)?.description).toContain(
       "Auto-resume scheduled",
     );
@@ -102,7 +103,9 @@ describe("scheduled usage-limit resume", () => {
       now,
     );
     expect(later?.label).toBe(nextDay?.label);
-    expect(later?.label).toContain("Oct 5");
+    expect(later?.label).toContain(
+      localDate(5, 4).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+    );
     expect(
       resolveScheduledLimitResume({ ...thread, snoozedUntil: now.toISOString() }, now)?.label,
     ).toBe(resolveScheduledLimitResume(thread, now)?.label);
