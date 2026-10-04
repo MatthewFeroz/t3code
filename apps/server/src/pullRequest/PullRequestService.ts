@@ -32,6 +32,8 @@ import {
   type PullRequestCommentInput,
   type PullRequestCommentUpdateInput,
   type PullRequestDetail,
+  type PullRequestPreview,
+  type PullRequestChecks,
   type PullRequestDiffFileContentsInput,
   type PullRequestDiffFileContentsResult,
   type PullRequestDiffStat,
@@ -72,8 +74,9 @@ import {
 import { detectSourceControlProviderFromRemoteUrl } from "@t3tools/shared/sourceControl";
 
 import { AllowGitHubReserve } from "../sourceControl/GitHubCli.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
 import {
@@ -83,7 +86,7 @@ import {
   PullRequestProviderError,
 } from "./PullRequestProvider.ts";
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
-import { PullRequestProviderRegistry } from "./PullRequestProviderRegistry.ts";
+import * as PullRequestProviderRegistry from "./PullRequestProviderRegistry.ts";
 import * as ViewedFiles from "./pullRequestViewedFiles.ts";
 
 export interface PullRequestMergeEvent extends PullRequestRef {
@@ -150,6 +153,10 @@ const LIST_CACHE_CAPACITY = 64;
 const LIST_STATS_CACHE_CAPACITY = 32;
 const DETAIL_CACHE_CAPACITY = 128;
 const DIFF_CACHE_CAPACITY = 128;
+// Each diff cache can retain at most 64 MiB of patch text, counting UTF-16 storage.
+const MAX_CACHED_DIFF_PATCH_BYTES = 512 * 1024;
+const canCacheDiff = (value: PullRequestDiffResult) =>
+  value.patch.length * 2 <= MAX_CACHED_DIFF_PATCH_BYTES;
 const FILES_VIEWED_CACHE_CAPACITY = 128;
 const VIEWER_CACHE_CAPACITY = 32;
 
@@ -202,6 +209,12 @@ export class PullRequestService extends Context.Service<
     readonly subscribeRefreshes: Stream.Stream<number>;
     readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
+    readonly preview: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestPreview, PullRequestError>;
+    readonly checks: (
+      input: PullRequestRef,
+    ) => Effect.Effect<PullRequestChecks | null, PullRequestError>;
     readonly activity: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestActivity, PullRequestError>;
@@ -464,7 +477,12 @@ function toPullRequestError(
   return (error) =>
     isProviderUnusable(error)
       ? toUnavailableError(error)
-      : new PullRequestOperationError({ operation, detail: error.detail, cause: error });
+      : new PullRequestOperationError({
+          operation,
+          detail: error.detail,
+          ...(error.reason === "not-found" ? { reason: "not-found" as const } : {}),
+          cause: error,
+        });
 }
 
 function withRateLimitBackoff(
@@ -546,6 +564,12 @@ function withRateLimitBackoff(
           listChangeRequestStats: wrap("listChangeRequestStats", api.listChangeRequestStats),
         }),
     getChangeRequest: wrap("getChangeRequest", api.getChangeRequest),
+    ...(api.getChangeRequestPreview === undefined
+      ? {}
+      : { getChangeRequestPreview: wrap("getChangeRequestPreview", api.getChangeRequestPreview) }),
+    ...(api.getChangeRequestChecks === undefined
+      ? {}
+      : { getChangeRequestChecks: wrap("getChangeRequestChecks", api.getChangeRequestChecks) }),
     ...(api.getChangeRequestSummary === undefined
       ? {}
       : {
@@ -600,11 +624,18 @@ function withRateLimitBackoff(
     Record<Exclude<keyof PullRequestProviderApi, keyof typeof wrapped>, never>;
 }
 
+// Capture before the provider read so a slow response keeps its original freshness through caches.
+const observeRead = Effect.fnUntraced(function* <A, E, R>(read: Effect.Effect<A, E, R>) {
+  const observedAt = yield* Clock.currentTimeMillis;
+  return { value: yield* read, observedAt };
+});
+
 export const make = Effect.gen(function* () {
   const mergedPullRequests = yield* PubSub.sliding<PullRequestMergeEvent>(64);
   const pullRequestRefreshes = yield* SubscriptionRef.make(0);
-  const registry = yield* PullRequestProviderRegistry;
-  const projections = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const registry = yield* PullRequestProviderRegistry.PullRequestProviderRegistry;
+  const projects = yield* ProjectService.ProjectService;
+  const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const rateLimits = yield* SourceControlRateLimit.SourceControlRateLimit;
   const filesViewedStore = yield* PullRequestFilesViewed.PullRequestFilesViewedRepository;
@@ -691,8 +722,10 @@ export const make = Effect.gen(function* () {
     filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     (filter.projectId === undefined
-      ? projections.getProjectShells(filter.projectIds)
-      : projections.getProjectShellById(filter.projectId).pipe(Effect.map(Option.toArray))
+      ? projects.listShells(
+          filter.projectIds === undefined ? undefined : { projectIds: filter.projectIds },
+        )
+      : projects.getShell(filter.projectId).pipe(Effect.map(Option.toArray))
     ).pipe(
       Effect.mapError(
         (error) =>
@@ -701,6 +734,18 @@ export const make = Effect.gen(function* () {
             detail: "The project list could not be read.",
             cause: error,
           }),
+      ),
+      Effect.flatMap((projects) =>
+        Effect.forEach(
+          projects,
+          (project) =>
+            project.repositoryIdentity != null
+              ? Effect.succeed(project)
+              : repositoryIdentities
+                  .resolve(project.workspaceRoot)
+                  .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
+          { concurrency: REPOSITORY_CONCURRENCY },
+        ),
       ),
       Effect.flatMap((projects) =>
         refineUnknownProjectKinds(projects, filter).pipe(
@@ -1065,6 +1110,7 @@ export const make = Effect.gen(function* () {
     readonly project: SupportedProject;
     readonly item: ProviderChangeRequest;
     readonly viewer: string;
+    readonly observedAt: number;
   }): PullRequestListEntry => {
     const viewer = input.viewer.toLowerCase();
     return {
@@ -1087,6 +1133,7 @@ export const make = Effect.gen(function* () {
       deletions: input.item.deletions,
       createdAt: input.item.createdAt,
       updatedAt: input.item.updatedAt,
+      observedAt: input.observedAt,
       ...(input.item.checksState === undefined || input.item.checksState === null
         ? {}
         : { checksState: input.item.checksState }),
@@ -1235,7 +1282,8 @@ export const make = Effect.gen(function* () {
                   }),
             })
             .pipe(
-              Effect.map((page): RepositoryBatch => {
+              observeRead,
+              Effect.map(({ value: page, observedAt }): RepositoryBatch => {
                 // The boundary instant was asked for inclusively, so the rows already sent at it
                 // come back with the slice. Dropping them here rather than asking for strictly
                 // older is what keeps their neighbours at the same instant from being skipped.
@@ -1251,7 +1299,7 @@ export const make = Effect.gen(function* () {
                   key,
                   entries: items
                     .filter((item) => matchesRowFilters(item, input.filters, viewer))
-                    .map((item) => toEntry({ project, item, viewer })),
+                    .map((item) => toEntry({ project, item, viewer, observedAt })),
                   errors: [],
                   truncated: page.truncated,
                   nextCursor:
@@ -1312,7 +1360,8 @@ export const make = Effect.gen(function* () {
             ? {}
             : { cursor: { updatedBefore: cursor.updatedBefore, delivered: cursor.delivered } }),
         }).pipe(
-          Effect.flatMap((page) =>
+          observeRead,
+          Effect.flatMap(({ value: page, observedAt }) =>
             Effect.flatMap(Clock.currentTimeMillis, (now) => {
               const rows = new Map<string, Array<ProviderChangeRequest>>();
               for (const [key, visibleAt] of searchVisibleAt) {
@@ -1373,7 +1422,7 @@ export const make = Effect.gen(function* () {
                     key: project.cursorKey,
                     entries: items
                       .filter((item) => matchesRowFilters(item, input.filters, viewer))
-                      .map((item) => toEntry({ project, item, viewer })),
+                      .map((item) => toEntry({ project, item, viewer, observedAt })),
                     errors: [],
                     truncated: page.truncated,
                     nextCursor:
@@ -1540,7 +1589,8 @@ export const make = Effect.gen(function* () {
             : project.api.getChangeRequestSummary(providerInput);
         return read.pipe(
           Effect.mapError(toPullRequestError("summary")),
-          Effect.map((changeRequest): PullRequestSummary => ({
+          observeRead,
+          Effect.map(({ value: changeRequest, observedAt }): PullRequestSummary => ({
             provider: project.api.kind,
             projectId: project.project.id,
             repository: project.repository,
@@ -1553,6 +1603,7 @@ export const make = Effect.gen(function* () {
             closedAt: changeRequest.closedAt ?? null,
             mergedAt: changeRequest.mergedAt ?? null,
             updatedAt: changeRequest.updatedAt,
+            observedAt,
             ...(changeRequest.isDraft === undefined ? {} : { isDraft: changeRequest.isDraft }),
             ...(changeRequest.author === undefined ? {} : { author: changeRequest.author }),
             ...(changeRequest.additions === undefined
@@ -1573,6 +1624,7 @@ export const make = Effect.gen(function* () {
             ...(changeRequest.mergeability === undefined
               ? {}
               : { mergeability: changeRequest.mergeability }),
+            ...(changeRequest.stack === undefined ? {} : { stack: changeRequest.stack }),
           })),
         );
       }),
@@ -1623,12 +1675,12 @@ export const make = Effect.gen(function* () {
                 host: project.host,
                 number: input.number,
               })
-              .pipe(Effect.mapError(toPullRequestError("detail"))),
+              .pipe(Effect.mapError(toPullRequestError("detail")), observeRead),
             viewerOf(project),
           ],
           { concurrency: 2 },
         ).pipe(
-          Effect.map(([changeRequest, viewer]): PullRequestDetail => ({
+          Effect.map(([{ value: changeRequest, observedAt }, viewer]): PullRequestDetail => ({
             provider: project.api.kind,
             capabilities: project.api.capabilities,
             projectId: project.project.id,
@@ -1650,9 +1702,11 @@ export const make = Effect.gen(function* () {
             ...(changeRequest.headRepositoryNameWithOwner === undefined
               ? {}
               : { headRepositoryNameWithOwner: changeRequest.headRepositoryNameWithOwner }),
+            ...(changeRequest.headSha ? { headSha: changeRequest.headSha } : {}),
             baseBranch: changeRequest.baseBranch,
             createdAt: changeRequest.createdAt,
             updatedAt: changeRequest.updatedAt,
+            observedAt,
             mergedAt: changeRequest.mergedAt,
             closedAt: changeRequest.closedAt,
             reviewers: changeRequest.reviewers,
@@ -1679,6 +1733,38 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const previewFields = (value: PullRequestPreview): PullRequestPreview => ({
+    projectId: value.projectId,
+    repository: value.repository,
+    number: value.number,
+    title: value.title,
+    url: value.url,
+    author: value.author,
+    state: value.state,
+    isDraft: value.isDraft,
+    createdAt: value.createdAt,
+  });
+  const previewUncached: PullRequestService["Service"]["preview"] = (input) =>
+    requireProject(input).pipe(
+      Effect.flatMap((project) =>
+        (project.api.getChangeRequestPreview ?? project.api.getChangeRequest)({
+          cwd: project.project.workspaceRoot,
+          repository: project.repository,
+          host: project.host,
+          number: input.number,
+        }).pipe(
+          Effect.mapError(toPullRequestError("preview")),
+          Effect.map((value) =>
+            previewFields({
+              ...value,
+              projectId: project.project.id,
+              repository: project.repository,
+            }),
+          ),
+        ),
+      ),
+    );
+
   const activityUncached: PullRequestService["Service"]["activity"] = (input) =>
     requireProject(input).pipe(
       Effect.flatMap((project) =>
@@ -1697,6 +1783,9 @@ export const make = Effect.gen(function* () {
               comments: activity.comments,
               commentCount: activity.commentCount,
               commentsTruncated: activity.commentsTruncated,
+              ...(activity.reviewThreadsTruncated === undefined
+                ? {}
+                : { reviewThreadsTruncated: activity.reviewThreadsTruncated }),
               reviewThreads: activity.reviewThreads,
               commits: activity.commits,
               ...(activity.reactions === undefined ? {} : { reactions: activity.reactions }),
@@ -2468,6 +2557,7 @@ export const make = Effect.gen(function* () {
     const record = (key: string, value: PullRequestDiffResult) =>
       Effect.map(Clock.currentTimeMillis, (at) => {
         held.delete(key);
+        if (!canCacheDiff(value)) return;
         if (held.size >= DIFF_CACHE_CAPACITY) {
           const oldest = held.keys().next().value;
           if (oldest !== undefined) held.delete(oldest);
@@ -2694,7 +2784,7 @@ export const make = Effect.gen(function* () {
       `project:${input.projectId}`,
       refScope(input),
     ]);
-    const decoded = yield* Schema.decodeUnknownEffect(codec)(payload).pipe(Effect.option);
+    const decoded = yield* Schema.decodeEffect(codec)(payload).pipe(Effect.option);
     return Option.isSome(decoded) ? decoded.value : yield* lookup;
   });
   const summaryCodec = Schema.fromJsonString(PullRequestSummary);
@@ -2800,6 +2890,30 @@ export const make = Effect.gen(function* () {
     return Cache.get(listCache, key);
   };
 
+  const checksCache = yield* Cache.makeWith(
+    (key: string) => {
+      const input = refOfCacheKey(key);
+      return requireProject(input).pipe(
+        Effect.flatMap((project) =>
+          project.api.getChangeRequestChecks === undefined
+            ? Effect.succeed(null)
+            : project.api
+                .getChangeRequestChecks({
+                  cwd: project.project.workspaceRoot,
+                  repository: project.repository,
+                  host: project.host,
+                  number: input.number,
+                })
+                .pipe(Effect.mapError(toPullRequestError("checks"))),
+        ),
+      );
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? DETAIL_CACHE_TTL : Duration.zero),
+    },
+  );
+
   const detailCache = yield* Cache.makeWith(
     (key: string) => {
       const statsKey = statsCacheKey(key);
@@ -2850,12 +2964,14 @@ export const make = Effect.gen(function* () {
     closedAt: detail.closedAt,
     mergedAt: detail.mergedAt,
     updatedAt: detail.updatedAt,
+    observedAt: detail.observedAt,
   });
   const shouldReplaceHeldSummary = (key: string, next: PullRequestSummary) => {
     const current = lastGoodSummary.peek(key);
     if (current === undefined) return true;
     if (current.state === "merged" && next.state !== "merged") return false;
-    return next.updatedAt >= current.updatedAt;
+    if (next.updatedAt !== current.updatedAt) return next.updatedAt > current.updatedAt;
+    return (next.observedAt ?? -Infinity) >= (current.observedAt ?? -Infinity);
   };
   const detail: PullRequestService["Service"]["detail"] = (input) => {
     const key = refCacheKey(input);
@@ -2885,6 +3001,27 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? DETAIL_CACHE_TTL : Duration.zero),
     },
   );
+
+  const previewCache = yield* Cache.makeWith(
+    (key: string) => {
+      return previewUncached(refOfCacheKey(key));
+    },
+    {
+      capacity: DETAIL_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? DETAIL_CACHE_TTL : Duration.zero),
+    },
+  );
+  const preview: PullRequestService["Service"]["preview"] = (input) => {
+    const key = refCacheKey(input);
+    return Cache.getSuccess(detailCache, key).pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Cache.get(previewCache, key),
+          onSome: (detail) => Effect.succeed(previewFields(detail)),
+        }),
+      ),
+    );
+  };
   const activity: PullRequestService["Service"]["activity"] = (input) => {
     const key = refCacheKey(input);
     return Cache.get(activityCache, key);
@@ -2917,7 +3054,21 @@ export const make = Effect.gen(function* () {
         ? (lastGoodSummary.peek(refCacheKey(input))?.updatedAt ?? null)
         : null,
     ]);
-    return staleDiff(key, Cache.get(diffCache, key));
+    const read = Cache.get(diffCache, key).pipe(
+      Effect.tap((value) =>
+        canCacheDiff(value)
+          ? Effect.void
+          : Cache.getSuccess(diffCache, key).pipe(
+              Effect.flatMap((current) =>
+                Option.isSome(current) && current.value === value
+                  ? Cache.invalidate(diffCache, key)
+                  : Effect.void,
+              ),
+              Effect.uninterruptible,
+            ),
+      ),
+    );
+    return staleDiff(key, read);
   };
 
   const filesViewedCache = yield* Cache.makeWith(
@@ -3130,7 +3281,9 @@ export const make = Effect.gen(function* () {
     ),
     refreshAfterTurn,
     detail: credentialCached(detail),
+    checks: credentialCached((input) => Cache.get(checksCache, refCacheKey(input))),
     activity: credentialCached(activity),
+    preview: credentialCached(preview),
     threadComments,
     diff: credentialCached(diff),
     diffFileContents,
