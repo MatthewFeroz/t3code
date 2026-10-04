@@ -30,6 +30,25 @@ describe("V1 Local Storage import", () => {
     expect(target.getItem(LEGACY_LOCAL_STORAGE_IMPORT_KEY)).toBe("1");
   });
 
+  it.each([null, "read"] as const)(
+    "keeps the V2 routing permission %s instead of restoring a legacy grant",
+    (permission) => {
+      const key = "t3code:github-routing:local";
+      const grant = (permission: string) =>
+        JSON.stringify({ environmentId: "local", connectionKey: "local", permission });
+      const current = permission === null ? null : grant(permission);
+      const target = storage(current === null ? {} : { [key]: current });
+      const stash = persisted({ entries: [{ id: "old", prompt: "recover this" }] });
+      importLegacyLocalStorage(target, [
+        [key, grant("read-write")],
+        [stashKey, stash],
+      ]);
+      expect(target.getItem(key)).toBe(current);
+      expect(target.getItem(stashKey)).toBe(stash);
+      expect(target.getItem(LEGACY_LOCAL_STORAGE_IMPORT_KEY)).toBe("1");
+    },
+  );
+
   it("merges stash IDs without overwriting a V2 edit or truncating recovered text", () => {
     const target = storage({
       [stashKey]: persisted({ entries: [{ id: "same", prompt: "V2 edit" }] }),

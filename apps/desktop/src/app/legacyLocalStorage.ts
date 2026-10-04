@@ -89,6 +89,8 @@ export function importLegacyLocalStorage(
   if (storage.getItem(LEGACY_LOCAL_STORAGE_IMPORT_KEY) !== null) return;
   for (const [key, value] of entries) {
     if (!key.startsWith("t3code:") || key === LEGACY_LOCAL_STORAGE_IMPORT_KEY) continue;
+    // Revocation removes the V2 key. Recovering content must not restore legacy consent.
+    if (key.startsWith("t3code:github-routing:")) continue;
     const current = storage.getItem(key);
     const merged = mergeLegacyLocalStorageValue(key, value, current);
     if (merged !== current) storage.setItem(key, merged);
