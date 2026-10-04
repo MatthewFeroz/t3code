@@ -20,8 +20,14 @@ const SIGNALS = [
 
 type SignalKey = (typeof SIGNALS)[number]["key"];
 
-/** The latest check for a signal; it describes the field only while `url` is still its value. */
-type EndpointCheck = { readonly url: string; readonly result: OtlpEndpointCheckResult | null };
+/**
+ * The latest check for a signal; it describes the field only while `url` is still its value.
+ * `null` is in flight. "unavailable" means the server could not run it, such as an older server.
+ */
+type EndpointCheck = {
+  readonly url: string;
+  readonly result: OtlpEndpointCheckResult | "unavailable" | null;
+};
 
 const isHttpUrl = (url: string) => /^https?:\/\/./.test(url);
 
@@ -30,6 +36,7 @@ function endpointStatus(url: string, check: EndpointCheck | undefined) {
   if (check?.url !== url) return { label: "Not checked", dot: "bg-muted-foreground/40" };
   const { result } = check;
   if (result === null) return { label: "Checking…", dot: "bg-warning" };
+  if (result === "unavailable") return { label: "Couldn't check", dot: "bg-muted-foreground/40" };
   switch (result._tag) {
     case "Accepted":
       return { label: `Connected · ${Math.round(result.latencyMs)} ms`, dot: "bg-success" };
@@ -59,9 +66,14 @@ export function TelemetryExportSettings() {
         ),
   );
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: true });
-  const checkOtlpEndpoint = useAtomCommand(serverEnvironment.checkOtlpEndpoint);
+  // Failures show in the status instead of a toast per field.
+  const checkOtlpEndpoint = useAtomCommand(serverEnvironment.checkOtlpEndpoint, {
+    reportFailure: false,
+    reportDefect: false,
+  });
   const values = { ...saved, ...draft };
-  const changed = SIGNALS.some(({ key }) => values[key].trim() !== saved[key]);
+  const changedSignals = SIGNALS.filter(({ key }) => values[key].trim() !== saved[key]);
+  const changed = changedSignals.length > 0;
   const running = environment?.serverConfig?.observability;
 
   const sendCheck = async (key: SignalKey, signal: OtlpSignal, url: string) => {
@@ -70,10 +82,8 @@ export function TelemetryExportSettings() {
     // A newer check for the same field replaces this one.
     setChecks((previous) => {
       if (previous[key]?.url !== url || previous[key].result !== null) return previous;
-      const next = { ...previous };
-      if (response._tag === "Success") next[key] = { url, result: response.value };
-      else delete next[key];
-      return next;
+      const result = response._tag === "Success" ? response.value : "unavailable";
+      return { ...previous, [key]: { url, result } };
     });
   };
 
@@ -114,7 +124,13 @@ export function TelemetryExportSettings() {
           try {
             const result = await updateSettings({
               environmentId: environment.environmentId,
-              input: { patch: { observability: values } },
+              input: {
+                patch: {
+                  observability: Object.fromEntries(
+                    changedSignals.map(({ key }) => [key, values[key]]),
+                  ),
+                },
+              },
             });
             if (result._tag === "Success") {
               setDraft({});
