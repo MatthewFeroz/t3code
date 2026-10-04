@@ -16,6 +16,8 @@ To send traces, metrics, or logs to an OpenTelemetry receiver, open
 **Settings > General > Diagnostics**, select an environment, and enter each signal's OTLP HTTP
 endpoint under **OpenTelemetry export** (for example `http://localhost:4318/v1/traces`). Save, then
 restart that environment's server. The receiver must be reachable from the server's machine.
+**Test** sends an empty export from the server to check an endpoint before or after you save it;
+saved endpoints are checked when the section opens.
 
 `T3CODE_OTLP_*_URL` and standard `OTEL_EXPORTER_OTLP_*` environment variables override the saved
 settings. Set `T3CODE_OTLP_HEADERS` for receivers that need authentication, and
