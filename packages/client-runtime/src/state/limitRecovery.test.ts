@@ -9,6 +9,7 @@ const resetAt = new Date(2026, 9, 4, 4).toISOString();
 const thread = {
   archivedAt: null,
   settledOverride: null,
+  snoozedUntil: null,
   runtime: {
     status: "failed" as const,
     activeRunId: null,
@@ -39,7 +40,7 @@ describe("scheduled usage-limit resume", () => {
     expect(resolveScheduledLimitResume(thread, now)?.label).toBe(time);
     expect(resolveScheduledLimitResume(thread, new Date(2026, 9, 3, 1))?.label).toContain("Oct 4");
     expect(resolveScheduledLimitResume(thread, now)?.description).toContain(
-      "Automatically resumes",
+      "Auto-resume scheduled",
     );
   });
   it("clears the promise after cancellation or when recovery belongs to another stop", () => {
@@ -78,6 +79,42 @@ describe("scheduled usage-limit resume", () => {
     expect(resolveScheduledLimitResume({ ...thread, settledOverride: "settled" }, now)).toBeNull();
     expect(
       resolveScheduledLimitResume({ ...thread, archivedAt: now.toISOString() }, now),
+    ).toBeNull();
+  });
+  it("shows a later snooze time because recovery cannot start before the thread wakes", () => {
+    const snoozedUntil = new Date(2026, 9, 5, 4).toISOString();
+    const later = resolveScheduledLimitResume({ ...thread, snoozedUntil }, now);
+    const nextDay = resolveScheduledLimitResume(
+      {
+        ...thread,
+        runtime: { ...thread.runtime, usageLimitResetAt: snoozedUntil },
+        limitRecovery: { ...thread.limitRecovery, resetAt: snoozedUntil },
+      },
+      now,
+    );
+    expect(later?.label).toBe(nextDay?.label);
+    expect(later?.label).toContain("Oct 5");
+    expect(
+      resolveScheduledLimitResume({ ...thread, snoozedUntil: now.toISOString() }, now)?.label,
+    ).toBe(resolveScheduledLimitResume(thread, now)?.label);
+  });
+  it("does not promise recovery when it is missing, invalid, or belongs to a different failure", () => {
+    expect(resolveScheduledLimitResume({ ...thread, limitRecovery: null }, now)).toBeNull();
+    expect(
+      resolveScheduledLimitResume(
+        { ...thread, runtime: { ...thread.runtime, lastErrorClass: "provider_error" } },
+        now,
+      ),
+    ).toBeNull();
+    expect(
+      resolveScheduledLimitResume(
+        {
+          ...thread,
+          runtime: { ...thread.runtime, usageLimitResetAt: "invalid" },
+          limitRecovery: { ...thread.limitRecovery, resetAt: "invalid" },
+        },
+        now,
+      ),
     ).toBeNull();
   });
   it("keeps the scheduled label while waiting for a restart after the reset time", () => {

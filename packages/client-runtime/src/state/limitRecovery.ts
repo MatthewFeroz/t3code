@@ -5,7 +5,7 @@ import type { EnvironmentThreadShell } from "./models.ts";
 export function resolveScheduledLimitResume(
   thread: Pick<
     EnvironmentThreadShell,
-    "runtime" | "latestRun" | "limitRecovery" | "archivedAt" | "settledOverride"
+    "runtime" | "latestRun" | "limitRecovery" | "archivedAt" | "settledOverride" | "snoozedUntil"
   >,
   now = new Date(),
 ) {
@@ -20,8 +20,11 @@ export function resolveScheduledLimitResume(
     recovery.resetAt !== thread.runtime.usageLimitResetAt
   )
     return null;
-  const reset = new Date(recovery.resetAt);
-  if (!Number.isFinite(reset.getTime())) return null;
+  const resetMs = Date.parse(recovery.resetAt);
+  if (!Number.isFinite(resetMs)) return null;
+  const snoozeMs = Date.parse(thread.snoozedUntil ?? "");
+  // The recovery worker waits for both the usage reset and any later snooze.
+  const reset = new Date(Number.isFinite(snoozeMs) ? Math.max(resetMs, snoozeMs) : resetMs);
   const sameDay =
     reset.getFullYear() === now.getFullYear() &&
     reset.getMonth() === now.getMonth() &&
@@ -35,6 +38,6 @@ export function resolveScheduledLimitResume(
   return {
     label: sameDay ? time : `${date}, ${time}`,
     accessibilityLabel: sameDay ? `Resumes at ${time}` : `Resumes ${date}, ${time}`,
-    description: `Automatically resumes when usage resets at ${reset.toLocaleString(undefined, { timeZoneName: "short" })}`,
+    description: `Auto-resume scheduled for ${reset.toLocaleString(undefined, { timeZoneName: "short" })}`,
   };
 }

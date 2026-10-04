@@ -2004,12 +2004,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                                 )}
                               >
                                 <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
-                                <span
-                                  role="status"
-                                  aria-label={scheduledResume?.accessibilityLabel}
-                                >
-                                  {topStatus.label}
-                                </span>
+                                <span role="status">{topStatus.label}</span>
                               </button>
                             }
                           />
