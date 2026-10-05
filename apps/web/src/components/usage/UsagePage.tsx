@@ -324,8 +324,13 @@ export function UsagePage() {
       ? `${formatDateTimeShort(window.sinceTime, window.timeZone)} to ${formatDateTimeShort(window.untilTime, window.timeZone)}`
       : `${formatDayShort(window.sinceDay)} to ${formatDayShort(window.untilDay)}`;
   const topbarContent = (
-    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 py-2 xl:flex">
-      <WorkspaceBreadcrumb ariaLabel="Usage breadcrumb" className="col-span-2 min-w-0">
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 pb-2 xl:flex xl:py-2">
+      {/* When the controls wrap below, the breadcrumb row keeps the titlebar
+          height so it stays centered with the sidebar toggle and window controls. */}
+      <WorkspaceBreadcrumb
+        ariaLabel="Usage breadcrumb"
+        className="col-span-2 flex h-(--workspace-topbar-height) min-w-0 items-center xl:h-auto"
+      >
         <WorkspaceBreadcrumbItem>
           <h1>Usage</h1>
         </WorkspaceBreadcrumbItem>
