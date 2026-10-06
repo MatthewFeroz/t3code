@@ -952,7 +952,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <SymbolView
             name="pin"
             size={11}
-            tintColorClassName={rowAppearance.mutedIconTintClassName}
+            tintColorClassName={rowAppearance.pinIconTintClassName}
             type="monochrome"
           />
         ) : null}
@@ -1131,6 +1131,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         }}
         style={rowAppearance.cardStyle}
       >
+        {pinnedRow && rowAppearance.pinnedOutlineStyle ? (
+          <View
+            pointerEvents="none"
+            className="absolute inset-0"
+            style={rowAppearance.pinnedOutlineStyle}
+          />
+        ) : null}
         {sidebarPane ? (
           cardContent
         ) : (

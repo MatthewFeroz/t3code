@@ -1531,7 +1531,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // All sidebar rows share one surface model. Live threads used to look
   // like elevated cards while settled threads were plain rows, leaving neither
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
-  // content; surface is reserved for interaction (hover, multi-select, route).
+  // content; background fills mark interaction (hover, multi-select, route) and
+  // unsent drafts. Pinned rows add a hairline outline instead of a fill.
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
@@ -1549,6 +1550,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     shouldRecede &&
       status === "working" &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
+    // Pin-colored hairline; in the built-in palettes it stays fainter than the
+    // focus and file-drop rings.
+    props.isPinned &&
+      !isFileDragOver &&
+      !props.sortable?.isDragging &&
+      "ring-1 ring-inset ring-sidebar-pin/20",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     // The lifted row is an opaque card so the rows beneath it never show
@@ -1714,7 +1721,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               type="button"
               aria-label="Unpin thread"
               onClick={handleUnpinClick}
-              className="group/unpin inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="group/unpin inline-flex cursor-pointer items-center rounded-sm text-sidebar-pin outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
           }
         >
@@ -1732,11 +1739,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         <TooltipPopup>Unpin thread</TooltipPopup>
       </Tooltip>
     ) : (
-      <PinIcon
-        aria-label="Pinned"
-        role="img"
-        className="size-3 shrink-0 text-muted-foreground/65"
-      />
+      <PinIcon aria-label="Pinned" role="img" className="size-3 shrink-0 text-sidebar-pin" />
     )
   ) : null;
 

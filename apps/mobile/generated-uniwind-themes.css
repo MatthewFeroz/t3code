@@ -14,6 +14,8 @@
       --color-thread-selected-foreground: #27272a;
       --color-thread-selected-foreground-muted: #71717b;
       --color-thread-hover: #fcfcfc;
+      --color-thread-pin: #1b4ed8;
+      --color-thread-pin-outline: rgba(27, 78, 216, 0.2);
       --color-row-hover: #f4f4f5;
       --color-composer-panel: rgba(252, 252, 252, 0.88);
       --color-composer-surface: rgba(244, 244, 245, 0.94);
@@ -84,6 +86,8 @@
       --color-drawer: #fafafa;
       --color-drawer-foreground: #27272a;
       --color-drawer-foreground-muted: #71717b;
+      --color-drawer-pin: #1b4ed8;
+      --color-drawer-pin-outline: rgba(27, 78, 216, 0.2);
       --color-drawer-border: #e4e4e7;
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
       --color-dot-separator: rgba(113, 113, 123, 0.35);
@@ -173,6 +177,8 @@
       --color-thread-selected-foreground: #f1f3f7;
       --color-thread-selected-foreground-muted: #a3a3a3;
       --color-thread-hover: #131313;
+      --color-thread-pin: #4b7cf3;
+      --color-thread-pin-outline: rgba(75, 124, 243, 0.2);
       --color-row-hover: #141414;
       --color-composer-panel: rgba(10, 10, 10, 0.92);
       --color-composer-surface: rgba(26, 27, 27, 0.9);
@@ -243,6 +249,8 @@
       --color-drawer: #000000;
       --color-drawer-foreground: #f1f3f7;
       --color-drawer-foreground-muted: #a3a3a3;
+      --color-drawer-pin: #4b7cf3;
+      --color-drawer-pin-outline: rgba(75, 124, 243, 0.2);
       --color-drawer-border: #141414;
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
       --color-dot-separator: rgba(129, 129, 129, 0.35);
@@ -332,6 +340,8 @@
       --color-thread-selected-foreground: #454554;
       --color-thread-selected-foreground-muted: #ac1668;
       --color-thread-hover: #f8f8f7;
+      --color-thread-pin: #b11f60;
+      --color-thread-pin-outline: rgba(177, 31, 96, 0.2);
       --color-row-hover: #eccfe3;
       --color-composer-panel: rgba(253, 247, 253, 0.88);
       --color-composer-surface: rgba(250, 243, 251, 0.94);
@@ -402,6 +412,8 @@
       --color-drawer: #f2e1f4;
       --color-drawer-foreground: #454554;
       --color-drawer-foreground-muted: #ac1668;
+      --color-drawer-pin: #c2236a;
+      --color-drawer-pin-outline: rgba(194, 35, 106, 0.2);
       --color-drawer-border: #eceae9;
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
       --color-dot-separator: rgba(172, 22, 104, 0.35);
@@ -491,6 +503,8 @@
       --color-thread-selected-foreground: #f4f4f5;
       --color-thread-selected-foreground-muted: #e7d0dd;
       --color-thread-hover: #261922;
+      --color-thread-pin: #eb88b4;
+      --color-thread-pin-outline: rgba(235, 136, 180, 0.2);
       --color-row-hover: #463753;
       --color-composer-panel: rgba(31, 26, 36, 0.92);
       --color-composer-surface: rgba(41, 35, 45, 0.9);
@@ -561,6 +575,8 @@
       --color-drawer: #171018;
       --color-drawer-foreground: #f4f4f5;
       --color-drawer-foreground-muted: #e7d0dd;
+      --color-drawer-pin: #e14c8e;
+      --color-drawer-pin-outline: rgba(225, 76, 142, 0.2);
       --color-drawer-border: #322028;
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
       --color-dot-separator: rgba(231, 208, 221, 0.35);
@@ -650,6 +666,8 @@
       --color-thread-selected-foreground: #241523;
       --color-thread-selected-foreground-muted: #5d585e;
       --color-thread-hover: #cae0d5;
+      --color-thread-pin: #166642;
+      --color-thread-pin-outline: rgba(22, 102, 66, 0.2);
       --color-row-hover: #d5e6dd;
       --color-composer-panel: rgba(243, 247, 244, 0.88);
       --color-composer-surface: rgba(243, 247, 244, 0.94);
@@ -720,6 +738,8 @@
       --color-drawer: #e2ede7;
       --color-drawer-foreground: #241523;
       --color-drawer-foreground-muted: #645f64;
+      --color-drawer-pin: #166642;
+      --color-drawer-pin-outline: rgba(22, 102, 66, 0.2);
       --color-drawer-border: #cbd3d0;
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
       --color-dot-separator: rgba(116, 108, 115, 0.35);
@@ -809,6 +829,8 @@
       --color-thread-selected-foreground: #fffaff;
       --color-thread-selected-foreground-muted: #bbc0bf;
       --color-thread-hover: #2a4938;
+      --color-thread-pin: #79dba5;
+      --color-thread-pin-outline: rgba(121, 219, 165, 0.2);
       --color-row-hover: #325c46;
       --color-composer-panel: rgba(27, 40, 33, 0.92);
       --color-composer-surface: rgba(27, 40, 33, 0.9);
@@ -879,6 +901,8 @@
       --color-drawer: #21362b;
       --color-drawer-foreground: #fffaff;
       --color-drawer-foreground-muted: #aab0af;
+      --color-drawer-pin: #69d69a;
+      --color-drawer-pin-outline: rgba(105, 214, 154, 0.2);
       --color-drawer-border: #6f7a75;
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
       --color-dot-separator: rgba(145, 149, 149, 0.35);
@@ -968,6 +992,8 @@
       --color-thread-selected-foreground: #241523;
       --color-thread-selected-foreground-muted: #5e5862;
       --color-thread-hover: #cdddea;
+      --color-thread-pin: #1f5d90;
+      --color-thread-pin-outline: rgba(31, 93, 144, 0.2);
       --color-row-hover: #d8e4ee;
       --color-composer-panel: rgba(245, 247, 248, 0.88);
       --color-composer-surface: rgba(245, 247, 248, 0.94);
@@ -1038,6 +1064,8 @@
       --color-drawer: #e4ecf2;
       --color-drawer-foreground: #241523;
       --color-drawer-foreground-muted: #655e69;
+      --color-drawer-pin: #1f5d90;
+      --color-drawer-pin-outline: rgba(31, 93, 144, 0.2);
       --color-drawer-border: #cdd2d9;
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
       --color-dot-separator: rgba(116, 108, 117, 0.35);
@@ -1127,6 +1155,8 @@
       --color-thread-selected-foreground: #fffaff;
       --color-thread-selected-foreground-muted: #b0b4ba;
       --color-thread-hover: #283e50;
+      --color-thread-pin: #81c2f0;
+      --color-thread-pin-outline: rgba(129, 194, 240, 0.2);
       --color-row-hover: #324e66;
       --color-composer-panel: rgba(23, 33, 43, 0.92);
       --color-composer-surface: rgba(23, 33, 43, 0.9);
@@ -1197,6 +1227,8 @@
       --color-drawer: #1e2d3b;
       --color-drawer-foreground: #fffaff;
       --color-drawer-foreground-muted: #a2a5ae;
+      --color-drawer-pin: #74bbee;
+      --color-drawer-pin-outline: rgba(116, 187, 238, 0.2);
       --color-drawer-border: #6d757f;
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
       --color-dot-separator: rgba(141, 143, 151, 0.35);
@@ -1286,6 +1318,8 @@
       --color-thread-selected-foreground: #241523;
       --color-thread-selected-foreground-muted: #62575d;
       --color-thread-hover: #ead8cf;
+      --color-thread-pin: #8e4622;
+      --color-thread-pin-outline: rgba(142, 70, 34, 0.2);
       --color-row-hover: #eee0d9;
       --color-composer-panel: rgba(249, 247, 245, 0.88);
       --color-composer-surface: rgba(249, 247, 245, 0.94);
@@ -1356,6 +1390,8 @@
       --color-drawer: #f3eae5;
       --color-drawer-foreground: #241523;
       --color-drawer-foreground-muted: #6a5d64;
+      --color-drawer-pin: #8e4622;
+      --color-drawer-pin-outline: rgba(142, 70, 34, 0.2);
       --color-drawer-border: #dad0ce;
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
       --color-dot-separator: rgba(118, 108, 116, 0.35);
@@ -1445,6 +1481,8 @@
       --color-thread-selected-foreground: #fffaff;
       --color-thread-selected-foreground-muted: #b9b1b0;
       --color-thread-hover: #4f3528;
+      --color-thread-pin: #f2aa7c;
+      --color-thread-pin-outline: rgba(242, 170, 124, 0.2);
       --color-row-hover: #644330;
       --color-composer-panel: rgba(41, 30, 26, 0.92);
       --color-composer-surface: rgba(41, 30, 26, 0.9);
@@ -1515,6 +1553,8 @@
       --color-drawer: #39281f;
       --color-drawer-foreground: #fffaff;
       --color-drawer-foreground-muted: #aca2a1;
+      --color-drawer-pin: #f1a06c;
+      --color-drawer-pin-outline: rgba(241, 160, 108, 0.2);
       --color-drawer-border: #7e716e;
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
       --color-dot-separator: rgba(150, 142, 143, 0.35);
@@ -1604,6 +1644,8 @@
       --color-thread-selected-foreground: #241523;
       --color-thread-selected-foreground-muted: #605662;
       --color-thread-hover: #ded8ed;
+      --color-thread-pin: #6449a2;
+      --color-thread-pin-outline: rgba(100, 73, 162, 0.2);
       --color-row-hover: #e5e0f0;
       --color-composer-panel: rgba(248, 247, 249, 0.88);
       --color-composer-surface: rgba(248, 247, 249, 0.94);
@@ -1674,6 +1716,8 @@
       --color-drawer: #edeaf4;
       --color-drawer-foreground: #241523;
       --color-drawer-foreground-muted: #685d6a;
+      --color-drawer-pin: #6449a2;
+      --color-drawer-pin-outline: rgba(100, 73, 162, 0.2);
       --color-drawer-border: #d5d0db;
       --color-drawer-shadow: rgba(0, 0, 0, 0.12);
       --color-dot-separator: rgba(118, 108, 118, 0.35);
@@ -1763,6 +1807,8 @@
       --color-thread-selected-foreground: #fffaff;
       --color-thread-selected-foreground-muted: #a6a2ae;
       --color-thread-hover: #352c4f;
+      --color-thread-pin: #b39bf5;
+      --color-thread-pin-outline: rgba(179, 155, 245, 0.2);
       --color-row-hover: #433765;
       --color-composer-panel: rgba(29, 25, 41, 0.92);
       --color-composer-surface: rgba(29, 25, 41, 0.9);
@@ -1833,6 +1879,8 @@
       --color-drawer: #272139;
       --color-drawer-foreground: #fffaff;
       --color-drawer-foreground-muted: #9b97a4;
+      --color-drawer-pin: #af95f4;
+      --color-drawer-pin-outline: rgba(175, 149, 244, 0.2);
       --color-drawer-border: #736d7e;
       --color-drawer-shadow: rgba(0, 0, 0, 0.32);
       --color-dot-separator: rgba(142, 138, 149, 0.35);

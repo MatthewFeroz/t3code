@@ -54,6 +54,11 @@ export function materialYouPaletteToMobileThemeVariables(
     "--color-foreground-tertiary": withAlpha(palette.onSurfaceVariant, 0.58),
     "--color-border": withAlpha(palette.outlineVariant, dark ? 0.5 : 0.65),
     "--color-focus": palette.primary,
+    // Material tonal palettes keep primary legible on their own surfaces.
+    "--color-thread-pin": palette.primary,
+    "--color-thread-pin-outline": withAlpha(palette.primary, 0.2),
+    "--color-drawer-pin": palette.primary,
+    "--color-drawer-pin-outline": withAlpha(palette.primary, 0.2),
     "--color-border-subtle": withAlpha(palette.outlineVariant, dark ? 0.34 : 0.46),
     "--color-separator": withAlpha(palette.outlineVariant, dark ? 0.24 : 0.34),
     "--color-subtle": withAlpha(palette.onSurface, 0.05),

@@ -243,6 +243,14 @@ export function createMobileThemeVariables(
   const c = nativeColors(colors);
   const groupedCard = themeColorToNativeColor(groupedCardColor);
   const textSurfaces = [c.canvas, c.surface, c.surfaceRaised, c.chrome, groupedCard];
+  // Pinned thread rows: the theme's focus accent, solved for contrast on every
+  // background the row can sit on (rest, pressed, selected).
+  const threadPin = readableTextColor(c.focus, [
+    ...textSurfaces,
+    c.toolbarControlHover,
+    c.sidebarRowActive,
+  ]);
+  const drawerPin = readableTextColor(c.focus, [c.sidebar, c.sidebarRowHover, c.sidebarRowActive]);
   return {
     "--color-screen": c.canvas,
     "--color-sheet": withAlpha(c.chrome, 0.98),
@@ -259,6 +267,8 @@ export function createMobileThemeVariables(
       c.sidebarRowActive,
     ),
     "--color-thread-hover": c.sidebarRowHover,
+    "--color-thread-pin": threadPin,
+    "--color-thread-pin-outline": themeColorWithAlpha(threadPin, 0.2),
     "--color-row-hover": c.toolbarControlHover,
     "--color-composer-panel": themeColorWithAlpha(c.canvas, appearance === "dark" ? 0.92 : 0.88),
     "--color-composer-surface": themeColorWithAlpha(
@@ -338,6 +348,8 @@ export function createMobileThemeVariables(
       c.sidebar,
       c.sidebarRowHover,
     ]),
+    "--color-drawer-pin": drawerPin,
+    "--color-drawer-pin-outline": themeColorWithAlpha(drawerPin, 0.2),
     "--color-drawer-border": c.sidebarBorder,
     "--color-drawer-shadow": withAlpha("#000000", appearance === "dark" ? 0.32 : 0.12),
     "--color-dot-separator": withAlpha(c.textMuted, 0.35),
