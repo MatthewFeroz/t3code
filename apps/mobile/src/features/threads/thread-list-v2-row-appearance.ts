@@ -49,6 +49,15 @@ export function getThreadListV2RowAppearance(
     tertiaryIconTintClassName: sidebarPane
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
+    pinIconTintClassName: sidebarPane ? "accent-drawer-pin" : "accent-thread-pin",
+    // Pinned cards get a hairline; flat native rows carry the pin by color alone.
+    pinnedOutlineStyle: sidebarPane
+      ? ({
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: theme["--color-drawer-pin-outline"],
+        } satisfies ViewStyle)
+      : undefined,
     style,
     cardStyle: sidebarPane ? { ...style, paddingHorizontal: 12, paddingVertical: 10 } : undefined,
     swipeContainerStyle,

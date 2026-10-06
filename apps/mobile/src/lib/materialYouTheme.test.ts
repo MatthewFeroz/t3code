@@ -59,6 +59,19 @@ describe("Material You system colors", () => {
     expect(variables["--color-placeholder"]).toBe("#1C1B1F9E");
   });
 
+  it("tints pinned thread rows with the system primary", () => {
+    const variables = materialYouPaletteToMobileThemeVariables(
+      palette,
+      "light",
+      getMobileThemeRuntimeVariables("t3-code", "light", "android"),
+    );
+
+    expect(variables["--color-thread-pin"]).toBe(palette.primary);
+    expect(variables["--color-drawer-pin"]).toBe(palette.primary);
+    expect(variables["--color-thread-pin-outline"]).toBe("#6750A433");
+    expect(variables["--color-drawer-pin-outline"]).toBe("#6750A433");
+  });
+
   it("uses the Messages-style RCS tones for sent messages", () => {
     const base = getMobileThemeRuntimeVariables("t3-code", "dark", "android");
     const dark = materialYouPaletteToMobileThemeVariables(

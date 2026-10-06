@@ -51,6 +51,13 @@ export function getThreadListV2RowAppearance(
     tertiaryIconTintClassName: sidebarPane
       ? "accent-drawer-foreground-muted"
       : "accent-foreground-tertiary",
+    pinIconTintClassName: sidebarPane ? "accent-drawer-pin" : "accent-thread-pin",
+    // Every Android row is a rounded card, so pinned rows always get the hairline.
+    pinnedOutlineStyle: {
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme[sidebarPane ? "--color-drawer-pin-outline" : "--color-thread-pin-outline"],
+    } satisfies ViewStyle,
     style,
     cardStyle: sidebarPane ? { ...style, paddingHorizontal: 12, paddingVertical: 10 } : style,
     swipeContainerStyle,
