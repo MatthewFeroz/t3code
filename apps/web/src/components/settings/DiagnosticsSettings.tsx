@@ -819,6 +819,7 @@ export function DiagnosticsSettingsPanel() {
     useState<typeof environmentId>(null);
   if (
     exportFormEnvironmentId !== environmentId &&
+    canReadDiagnostics &&
     !isInitialLoading &&
     !isProcessInitialLoading &&
     !isResourceInitialLoading
@@ -1344,7 +1345,7 @@ export function DiagnosticsSettingsPanel() {
           <EmptyRows label={isInitialLoading ? "Loading span names..." : "No spans found."} />
         )}
       </SettingsSection>
-      {exportFormEnvironmentId === environmentId && <TelemetryExportSettings key={environmentId} />}
+      {exportFormEnvironmentId === environmentId && <TelemetryExportSettings />}
     </SettingsPageContainer>
   );
 }

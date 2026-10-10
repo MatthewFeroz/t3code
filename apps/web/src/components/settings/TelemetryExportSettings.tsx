@@ -43,11 +43,26 @@ function endpointStatus(url: string, check: EndpointCheck | undefined) {
 
 export function TelemetryExportSettings() {
   const { environment, scope } = useSettingsScope();
+  if (scope.kind !== "environment" || !environment) {
+    return (
+      <SettingsSection title="OpenTelemetry export" id="telemetry-export">
+        <SettingsScopeNotice target="environment">
+          Choose one environment to configure its telemetry exports.
+        </SettingsScopeNotice>
+      </SettingsSection>
+    );
+  }
+  // Mounts per environment so its saved endpoints are the ones checked on open.
+  return <TelemetryExportForm key={environment.environmentId} />;
+}
+
+function TelemetryExportForm() {
+  const { environment } = useSettingsScope();
   const saved = useScopedSettings((settings) => settings.observability);
   const [draft, setDraft] = useState<Partial<typeof saved>>({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const environmentId = scope.kind === "environment" ? environment?.environmentId : undefined;
+  const environmentId = environment?.environmentId;
   // Checks need the same grant as saving, so one permission covers the whole form.
   const canEdit = useAtomValue(
     serverEnvironment.checkOtlpEndpoint.permissionAtom(environmentId ?? null),
@@ -57,14 +72,12 @@ export function TelemetryExportSettings() {
     canEdit && environment?.serverConfig?.environment.capabilities.otlpEndpointCheck === true;
   // Saved endpoints open as pending; the effect below sends their checks.
   const [checks, setChecks] = useState<Partial<Record<SignalKey, EndpointCheck>>>(() =>
-    environmentId === undefined
-      ? {}
-      : Object.fromEntries(
-          SIGNALS.filter(({ key }) => isHttpUrl(saved[key])).map(({ key }) => [
-            key,
-            { url: saved[key], result: null },
-          ]),
-        ),
+    Object.fromEntries(
+      SIGNALS.filter(({ key }) => isHttpUrl(saved[key])).map(({ key }) => [
+        key,
+        { url: saved[key], result: null },
+      ]),
+    ),
   );
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: true });
   const checkOtlpEndpoint = useAtomCommand(serverEnvironment.checkOtlpEndpoint);
@@ -99,18 +112,8 @@ export function TelemetryExportSettings() {
       // oxlint-disable-next-line react/set-state-in-effect -- State changes only after the response arrives.
       if (check?.result === null) void sendCheck(key, signal, check.url);
     }
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Sends the saved endpoints' checks once they are allowed; the section remounts per environment.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Sends the saved endpoints' checks once they are allowed; the form remounts per environment.
   }, [canCheck]);
-
-  if (scope.kind !== "environment") {
-    return (
-      <SettingsSection title="OpenTelemetry export" id="telemetry-export">
-        <SettingsScopeNotice target="environment">
-          Choose one environment to configure its telemetry exports.
-        </SettingsScopeNotice>
-      </SettingsSection>
-    );
-  }
 
   return (
     <SettingsSection title="OpenTelemetry export" id="telemetry-export">
