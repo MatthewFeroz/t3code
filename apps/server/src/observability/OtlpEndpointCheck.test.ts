@@ -5,7 +5,7 @@ import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as NetAddress from "effect/unstable/net/NetAddress";
+import * as NetAddress from "effect/net/NetAddress";
 import {
   FetchHttpClient,
   HttpClient,
@@ -14,7 +14,7 @@ import {
   HttpServer,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 import { describe } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";

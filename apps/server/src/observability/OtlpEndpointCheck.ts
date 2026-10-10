@@ -3,14 +3,14 @@ import type {
   OtlpEndpointCheckResult,
   OtlpSignal,
 } from "@t3tools/contracts";
-import { otlpSerializationLayer } from "@t3tools/shared/observability";
+import { layerOtlpSerialization } from "@t3tools/shared/observability";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { OtlpSerialization } from "effect/unstable/observability";
+import { FetchHttpClient, HttpClient } from "effect/http";
+import { OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "../config.ts";
 
@@ -63,7 +63,7 @@ const make = Effect.gen(function* () {
     const body = yield* Effect.gen(function* () {
       const serialization = yield* OtlpSerialization.OtlpSerialization;
       return emptyExport(serialization, signal);
-    }).pipe(Effect.provide(otlpSerializationLayer(signalExport.protocol)));
+    }).pipe(Effect.provide(layerOtlpSerialization(signalExport.protocol)));
     const startedAt = yield* Clock.currentTimeMillis;
     const response = yield* httpClient
       .post(url, { body, headers })
