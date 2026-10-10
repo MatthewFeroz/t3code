@@ -135,6 +135,29 @@ describe("chat canvas layout", () => {
     expect(result.overlapsDetailsCard).toBe(false);
     expect(result.chat).toEqual({ left: 424, width: 736, insetStart: 0, insetEnd: 0 });
   });
+  it("keeps a dragged or resized preview below the open find bar", () => {
+    const findBar = { left: 1292, right: 1572, bottom: 48 };
+    const layout = (lastInteraction: "drag" | "resize") =>
+      resolveChatCanvasLayout({
+        container: { width: 1584, height: 988 },
+        maxChatWidth: 736,
+        composerHeight: 180,
+        findBar,
+        preview: {
+          ...preview,
+          width: 240,
+          source: { width: 240, height: 365 },
+          position: { x: 1332, y: 12 },
+          lastInteraction,
+        },
+      });
+    for (const lastInteraction of ["drag", "resize"] as const) {
+      const result = layout(lastInteraction);
+      expect(result.frame).toEqual({ x: 1332, y: 60, width: 240, height: 365 });
+      expect(result.overlapsDetailsCard).toBe(false);
+      expect(result.chat).toEqual({ left: 424, width: 736, insetStart: 0, insetEnd: 0 });
+    }
+  });
   it("uses space beside the full card if a tall preview cannot fit below it", () => {
     const result = resolveChatCanvasLayout({
       container: { width: 1584, height: 988 },

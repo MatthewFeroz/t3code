@@ -32,6 +32,7 @@ export function resolveChatCanvasLayout({
   minChatWidth = 640,
   composerHeight = 0,
   detailsCard = null,
+  findBar = null,
 }: {
   container: PreviewMiniPlayerSize;
   preview: ChatCanvasPreview | null;
@@ -40,6 +41,8 @@ export function resolveChatCanvasLayout({
   minChatWidth?: number;
   composerHeight?: number;
   detailsCard?: PreviewMiniPlayerObstacles["detailsCard"];
+  /** The open find bar. It only keeps the floating preview clear; chat stays put. */
+  findBar?: PreviewMiniPlayerObstacles["detailsCard"];
 }) {
   const centeredWidth = Math.max(0, Math.min(maxChatWidth, container.width - padding * 2));
   // A workspace card that does not fit beside the centered chat first moves
@@ -90,13 +93,16 @@ export function resolveChatCanvasLayout({
         });
       }
     }
+    const findBarObstacles = findBar ? { detailsCard: findBar, composer: null } : undefined;
     const preferredFrame = {
       ...frame,
-      ...clampPreviewMiniPlayerPosition(frame, container, frame, undefined, minimumPreviewX),
+      ...clampPreviewMiniPlayerPosition(frame, container, frame, findBarObstacles, minimumPreviewX),
     };
     // A resize keeps its anchored edge and consumes card height first. A drag
     // clears the full card whenever it can, so moving alone never folds it.
-    const cardObstacle = preview.lastInteraction === "resize" ? null : detailsCard;
+    // The find bar cannot fold, so it stays clear either way. It shares the
+    // card's columns, and an open card already reaches up past it.
+    const cardObstacle = preview.lastInteraction === "resize" ? findBar : (detailsCard ?? findBar);
     frame = {
       ...frame,
       ...clampPreviewMiniPlayerPosition(
@@ -166,7 +172,7 @@ export function resolveChatCanvasLayout({
             frame,
             container,
             frame,
-            { composer: obstacles.composer, detailsCard: null },
+            { composer: obstacles.composer, detailsCard: findBar },
             minimumPreviewX,
           ),
         };

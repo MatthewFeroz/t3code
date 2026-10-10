@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
+import { THREAD_DETAILS_CARD_GAP, THREAD_DETAILS_CARD_WIDTH } from "./threadDetailsCardLayout";
 import type { PreviewMiniPlayerObstacles } from "../preview/previewMiniPlayerLayout";
 import { observeResize } from "../../lib/observeResize";
 
@@ -98,10 +99,29 @@ export function ChatCanvas({
   }, [composerOverlayElement, timelineElement]);
   const context = useMemo(() => {
     const container = { width: measurements.width, height: measurements.height };
+    // The open find bar fills the inset above the details card, in the card's columns.
+    const gap = THREAD_DETAILS_CARD_GAP;
+    const findBar =
+      detailsCardTopInset > 0
+        ? {
+            left:
+              container.width -
+              gap -
+              Math.min(THREAD_DETAILS_CARD_WIDTH, container.width - gap * 2),
+            right: container.width - gap,
+            bottom: detailsCardTopInset,
+          }
+        : null;
     return {
       container,
       lane: { padding: measurements.padding, minChatWidth: measurements.minChatWidth },
-      layout: resolveChatCanvasLayout({ ...measurements, container, preview, detailsCard }),
+      layout: resolveChatCanvasLayout({
+        ...measurements,
+        container,
+        preview,
+        detailsCard,
+        findBar,
+      }),
       previewKey: preview?.key ?? null,
       reportPreview,
       clearPreview,
