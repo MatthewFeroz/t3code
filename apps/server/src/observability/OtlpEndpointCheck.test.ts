@@ -5,6 +5,7 @@ import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Tracer from "effect/Tracer";
 import * as NetAddress from "effect/net/NetAddress";
 import {
   FetchHttpClient,
@@ -24,6 +25,7 @@ interface PostedRequest {
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
+  readonly signal: AbortSignal;
 }
 
 /** Answers every post with `status`, or fails like a refused connection when it is null. */
@@ -33,11 +35,12 @@ const checkWith = (
   httpClientLayer?: Layer.Layer<HttpClient.HttpClient>,
 ) => {
   const requests: Array<PostedRequest> = [];
-  const httpClient = HttpClient.make((request) => {
+  const httpClient = HttpClient.make((request, _url, signal) => {
     requests.push({
       url: request.url,
       headers: request.headers,
       body: request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "",
+      signal,
     });
     return status === null
       ? Effect.fail(
@@ -125,6 +128,45 @@ describe("OtlpEndpointCheck", () => {
       assert.strictEqual(result._tag, "Accepted");
       assert.lengthOf(requests, 1);
       assert.isUndefined(requests[0]?.headers.authorization);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("releases the request once the status is known", () => {
+    const { requests, layer } = checkWith(200);
+    return Effect.gen(function* () {
+      yield* check({ signal: "traces", url: "http://collector:4318/v1/traces" });
+
+      assert.isTrue(requests[0]?.signal.aborted);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("keeps endpoint URLs and credentials out of traces", () => {
+    const url = "https://collector.example.com/v1/logs?api_key=query-secret";
+    const { requests, layer } = checkWith(200, {
+      otlpLogsUrl: url,
+      otlpLogsExport: {
+        ...DEFAULT_SIGNAL_EXPORT,
+        headers: { "x-honeycomb-team": "header-secret" },
+      },
+      otelEnvironment: OtelEnvironment.none,
+    });
+    const recorded: Array<unknown> = [];
+    const tracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options);
+        const end = span.end.bind(span);
+        span.end = (endTime, exit) => {
+          end(endTime, exit);
+          recorded.push({ name: span.name, attributes: Object.fromEntries(span.attributes) });
+        };
+        return span;
+      },
+    });
+    return Effect.gen(function* () {
+      yield* check({ signal: "logs", url }).pipe(Effect.withTracer(tracer));
+
+      assert.strictEqual(requests[0]?.headers["x-honeycomb-team"], "header-secret");
+      assert.notInclude(JSON.stringify(recorded), "secret");
     }).pipe(Effect.provide(layer));
   });
 

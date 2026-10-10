@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { OtlpEndpointCheckResult, OtlpSignal } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
@@ -47,6 +48,13 @@ export function TelemetryExportSettings() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const environmentId = scope.kind === "environment" ? environment?.environmentId : undefined;
+  // Checks need the same grant as saving, so one permission covers the whole form.
+  const canEdit = useAtomValue(
+    serverEnvironment.checkOtlpEndpoint.permissionAtom(environmentId ?? null),
+  );
+  // Servers from before endpoint checks keep the editor without Test.
+  const canCheck =
+    canEdit && environment?.serverConfig?.environment.capabilities.otlpEndpointCheck === true;
   // Saved endpoints open as pending; the effect below sends their checks.
   const [checks, setChecks] = useState<Partial<Record<SignalKey, EndpointCheck>>>(() =>
     environmentId === undefined
@@ -85,13 +93,14 @@ export function TelemetryExportSettings() {
   };
 
   useEffect(() => {
+    if (!canCheck) return;
     for (const { key, signal } of SIGNALS) {
       const check = checks[key];
       // oxlint-disable-next-line react/set-state-in-effect -- State changes only after the response arrives.
       if (check?.result === null) void sendCheck(key, signal, check.url);
     }
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Runs once; the section remounts per environment.
-  }, []);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Sends the saved endpoints' checks once they are allowed; the section remounts per environment.
+  }, [canCheck]);
 
   if (scope.kind !== "environment") {
     return (
@@ -136,17 +145,23 @@ export function TelemetryExportSettings() {
           Send traces, metrics, and logs to an OTLP HTTP receiver. Restart the server to apply.
           Environment variables override these settings.
         </p>
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground">
+            This connection lacks permission to change settings on{" "}
+            {environment?.label ?? "the selected environment"}.
+          </p>
+        )}
         {SIGNALS.map(({ key, label, signal }) => {
           const url = values[key].trim();
-          const status = endpointStatus(url, checks[key]);
+          const status = canCheck ? endpointStatus(url, checks[key]) : null;
           return (
             <div key={key} className="grid gap-1.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5">
-                  <ConnectionStatusDot dotClassName={status.dot} />
+                  {status && <ConnectionStatusDot dotClassName={status.dot} />}
                   <Label htmlFor={key}>{label} endpoint</Label>
                 </div>
-                <span className="text-xs text-muted-foreground">{status.label}</span>
+                {status && <span className="text-xs text-muted-foreground">{status.label}</span>}
               </div>
               <div className="flex gap-2">
                 <Input
@@ -157,21 +172,23 @@ export function TelemetryExportSettings() {
                   title="Enter an HTTP or HTTPS endpoint, or leave empty to disable export."
                   placeholder={`http://localhost:4318/v1/${signal}`}
                   value={values[key]}
-                  disabled={saving}
+                  disabled={saving || !canEdit}
                   onChange={(event) => {
                     setDraft((previous) => ({ ...previous, [key]: event.target.value }));
                     setMessage(null);
                   }}
                 />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={!isHttpUrl(url) || checks[key]?.result === null}
-                  onClick={() => void checkEndpoint(key, signal, url)}
-                >
-                  Test
-                </Button>
+                {canCheck && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!isHttpUrl(url) || checks[key]?.result === null}
+                    onClick={() => void checkEndpoint(key, signal, url)}
+                  >
+                    Test
+                  </Button>
+                )}
               </div>
               {saved[key] !== (running?.[key] ?? "") && (
                 <p className="break-all text-xs text-muted-foreground">
@@ -190,7 +207,7 @@ export function TelemetryExportSettings() {
               type="button"
               size="xs"
               variant="outline"
-              disabled={!changed || saving}
+              disabled={!changed || saving || !canEdit}
               onClick={() => {
                 setDraft({});
                 setMessage(null);
@@ -198,7 +215,7 @@ export function TelemetryExportSettings() {
             >
               Discard
             </Button>
-            <Button type="submit" size="xs" disabled={!changed || saving}>
+            <Button type="submit" size="xs" disabled={!changed || saving || !canEdit}>
               {saving ? "Saving…" : "Save"}
             </Button>
           </div>

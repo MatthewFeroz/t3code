@@ -65,10 +65,16 @@ const make = Effect.gen(function* () {
       return emptyExport(serialization, signal);
     }).pipe(Effect.provide(layerOtlpSerialization(signalExport.protocol)));
     const startedAt = yield* Clock.currentTimeMillis;
-    const response = yield* httpClient
+    // Only the status matters. The scope aborts the request once it is read, so a receiver
+    // that keeps its body open cannot hold the connection. Tracing stays off, as it does for
+    // real exports, because request spans record the URL and custom credential headers.
+    const response = yield* HttpClient.withScope(httpClient)
       .post(url, { body, headers })
       .pipe(
+        Effect.map(({ status }) => ({ status })),
+        Effect.scoped,
         Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+        Effect.withTracerEnabled(false),
         Effect.timeoutOption(CHECK_TIMEOUT),
         Effect.option,
       );

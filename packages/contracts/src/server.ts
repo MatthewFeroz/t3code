@@ -362,7 +362,8 @@ export type OtlpSignal = typeof OtlpSignal.Type;
 
 export const OtlpEndpointCheckInput = Schema.Struct({
   signal: OtlpSignal,
-  url: TrimmedNonEmptyString,
+  // Receivers are HTTP only; other schemes, such as data:, answer without contacting one.
+  url: TrimmedNonEmptyString.check(Schema.isPattern(/^https?:\/\/./i)),
 });
 export type OtlpEndpointCheckInput = typeof OtlpEndpointCheckInput.Type;
 
