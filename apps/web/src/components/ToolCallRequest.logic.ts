@@ -1,7 +1,7 @@
 import * as Predicate from "effect/Predicate";
 
 // Fields that usually name what an item is, in the order a summary uses them.
-const SUMMARY_FIELDS = ["type", "kind", "name", "title", "text", "label", "id"] as const;
+const SUMMARY_FIELDS = ["type", "kind", "action", "name", "title", "text", "label", "id"] as const;
 const PREVIEW_LENGTH = 120;
 
 /**

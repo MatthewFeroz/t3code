@@ -58,6 +58,8 @@ describe("confirm dialog coordinator", () => {
   it("keeps a queued tool call's details through display and close", async () => {
     const unregister = registerConfirmDialogHost();
     const toolCall = {
+      identifier: "excalidraw · export_to_excalidraw",
+      highlights: [],
       description: "Upload diagram to excalidraw.com and return shareable URL.",
       arguments: { json: "{}" },
       argumentDescriptions: { json: "Serialized Excalidraw JSON" },

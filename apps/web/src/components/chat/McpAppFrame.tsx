@@ -9,7 +9,10 @@ import {
   type McpAppHost,
   type McpAppHostContext,
 } from "@t3tools/client-runtime/mcp-apps";
-import { summarizeMcpAppToolCall } from "@t3tools/client-runtime/mcp-apps/tool-call";
+import {
+  mcpAppToolCallHighlights,
+  summarizeMcpAppToolCall,
+} from "@t3tools/client-runtime/mcp-apps/tool-call";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   clampMcpAppHeight,
@@ -342,7 +345,11 @@ export function McpAppFrame(props: {
             title: info.value.title,
             tool: info.value.tool,
           });
-          const approved = await ask(question, { ...summary, arguments: args });
+          const approved = await ask(question, {
+            ...summary,
+            highlights: mcpAppToolCallHighlights(args),
+            arguments: args,
+          });
           if (approved !== true) throw new McpAppHostRefusal("Declined by the user.");
         }
         const result = await latest.current.callTool({

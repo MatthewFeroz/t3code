@@ -5,7 +5,11 @@ import type { ConfirmDialogOptions, ConfirmDialogVariant } from "@t3tools/contra
  * dialog adds what the tool does and its arguments, folded.
  */
 export interface ConfirmDialogToolCall {
+  /** The exact server and tool, shown beside the server's own wording. */
+  readonly identifier: string;
   readonly description?: string;
+  /** Short top-level arguments shown without opening the request. */
+  readonly highlights: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly arguments: Readonly<Record<string, unknown>>;
   readonly argumentDescriptions: Readonly<Record<string, string>>;
 }

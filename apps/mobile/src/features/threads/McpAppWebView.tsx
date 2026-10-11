@@ -8,7 +8,6 @@ import {
   type McpAppHost,
   type McpAppHostContext,
 } from "@t3tools/client-runtime/mcp-apps";
-import { summarizeMcpAppToolCall } from "@t3tools/client-runtime/mcp-apps/tool-call";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId, MessageId } from "@t3tools/contracts";
@@ -26,6 +25,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, View } from "react-nativ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
+import { useMcpAppToolApproval } from "./McpAppToolApproval";
 import { AppText as Text } from "../../components/AppText";
 import { shareGeneratedAttachment } from "../../lib/attachmentDownload";
 import { mobileHtmlRenderTheme } from "../../lib/htmlRenderTheme";
@@ -85,40 +85,6 @@ const commandFailure = (result: {
   );
 };
 
-/**
- * Asks before an app runs a tool: the tool's own description first, with the
- * raw arguments one tap away rather than in the alert body.
- */
-const confirmToolCall = (
-  server: string,
-  name: string,
-  info: { readonly title?: string; readonly tool?: unknown },
-  args: Record<string, unknown>,
-): Promise<boolean> => {
-  const { question, description } = summarizeMcpAppToolCall({
-    server,
-    name,
-    title: info.title,
-    tool: info.tool,
-  });
-  const request = JSON.stringify(args, null, 2);
-  return new Promise<boolean>((resolve) => {
-    Alert.alert(
-      question,
-      description ?? "",
-      [
-        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-        {
-          text: "Show request",
-          onPress: () => void confirm(question, request, "Allow").then(resolve),
-        },
-        { text: "Allow", onPress: () => resolve(true) },
-      ],
-      { cancelable: true, onDismiss: () => resolve(false) },
-    );
-  });
-};
-
 const confirm = (title: string, message: string, action: string) =>
   new Promise<boolean>((resolve) => {
     Alert.alert(
@@ -165,6 +131,7 @@ export function ThreadMcpApp(props: {
   // rerender) must not rebuild the host of a document that is already live.
   const [app, setApp] = useState(props.app);
   if (!mcpAppReferencesEqual(app, props.app)) setApp(props.app);
+  const { confirmToolCall, cancelToolCall, approvalDialog } = useMcpAppToolApproval();
   const fullscreen = props.displayMode === "fullscreen";
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -315,10 +282,17 @@ export function ThreadMcpApp(props: {
   }, [props.environmentId, props.threadId, props.itemId, app.tool]);
   const webView = useRef<WebView<object>>(null);
   const hostRef = useRef<McpAppHost | null>(null);
+  const stopToolRequests = useRef(() => {});
 
   // One host per loaded document.
   useEffect(() => {
     if (uri === null) return;
+    let active = true;
+    const stop = () => {
+      active = false;
+      cancelToolCall();
+    };
+    stopToolRequests.current = stop;
     const scope = () => {
       const { environmentId, threadId, itemId } = latest.current.props;
       return { environmentId, input: { threadId, itemId } };
@@ -362,11 +336,13 @@ export function ThreadMcpApp(props: {
       callTool: async ({ name, arguments: args }) => {
         const { environmentId, input } = scope();
         const info = await latest.current.toolInfo({ environmentId, input: { ...input, name } });
+        if (!active) throw new McpAppHostRefusal("This app was stopped.");
         if (info._tag !== "Success") throw commandFailure(info);
         if (!info.value.callable) throw new McpAppHostRefusal("This app cannot call that tool.");
         if (!info.value.readOnly && !(await confirmToolCall(app.server, name, info.value, args))) {
           throw new McpAppHostRefusal("Declined by the user.");
         }
+        if (!active) throw new McpAppHostRefusal("This app was stopped.");
         const result = await latest.current.callTool({
           environmentId,
           input: { ...input, name, arguments: args },
@@ -436,6 +412,7 @@ export function ThreadMcpApp(props: {
           // The inline view is torn down by the switch (this row unmounts
           // while the modal covers it); the modal opens a fresh view.
           // The inline view steps aside for the modal; it gets its teardown first.
+          stop();
           await hostRef.current?.teardown();
           // The wait may have let an approval arrive, or the user moved to
           // another screen; either way the view reloads inline.
@@ -454,6 +431,7 @@ export function ThreadMcpApp(props: {
           return "fullscreen";
         }
         if (mode === "inline" && current.displayMode === "fullscreen") {
+          stop();
           await hostRef.current?.teardown();
           current.onExitFullscreen?.();
           return "inline";
@@ -496,6 +474,7 @@ export function ThreadMcpApp(props: {
         }
       },
       onRequestTeardown: () => {
+        stop();
         const current = latest.current.props;
         if (current.displayMode === "fullscreen") {
           void hostRef.current?.teardown().then(() => current.onExitFullscreen?.());
@@ -509,12 +488,13 @@ export function ThreadMcpApp(props: {
     });
     hostRef.current = next;
     return () => {
+      stop();
       // An unmount cannot wait: the request goes out before the view does.
       void next.teardown();
       hostRef.current = null;
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A restarted view needs a new host.
-  }, [uri, app, generation, documentKey]);
+  }, [uri, app, generation, documentKey, confirmToolCall, cancelToolCall]);
 
   // The host reads the context through `latest`; these only say when to resend.
   useEffect(() => {
@@ -574,6 +554,7 @@ export function ThreadMcpApp(props: {
         fullscreen ? { flex: 1 } : { height: MCP_APP_ROW_HEIGHT, marginBottom: ROW_BOTTOM_MARGIN }
       }
     >
+      {approvalDialog}
       {navigatedAway ? (
         <View className="flex-1 items-center justify-center">
           <Text className="text-sm text-foreground-muted">
@@ -617,6 +598,7 @@ export function ThreadMcpApp(props: {
             if (!Predicate.isObject(envelope) || envelope.secret !== secret) return;
             const message = envelope.message;
             if (Predicate.isObject(message) && message.t3 === "navigated") {
+              stopToolRequests.current();
               hostRef.current?.dispose();
               setNavigatedAway(true);
               return;

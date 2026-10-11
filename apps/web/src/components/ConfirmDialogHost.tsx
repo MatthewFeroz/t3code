@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   completeConfirmDialogClose,
@@ -17,7 +17,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
-import { ToolCallRequest } from "./ToolCallRequest";
+import { ToolCallDetails } from "./ToolCallRequest";
 
 type ConfirmationCopy = {
   readonly title: string;
@@ -53,6 +53,7 @@ function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
 }
 
 export function ConfirmDialogHost() {
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const state = useSyncExternalStore(
     subscribeConfirmDialog,
     readConfirmDialogState,
@@ -63,9 +64,13 @@ export function ConfirmDialogHost() {
 
   const message = state.status === "idle" ? "" : state.message;
   const toolCall = state.status === "idle" ? undefined : state.toolCall;
+  const [requestView, setRequestView] = useState({ toolCall, key: 0 });
+  if (requestView.toolCall !== toolCall) {
+    setRequestView({ toolCall, key: requestView.key + 1 });
+  }
   // A tool call's message is already the question; its description is the tool's.
   const copy: ConfirmationCopy = toolCall
-    ? { title: message, description: toolCall.description ?? null }
+    ? { title: message, description: null }
     : resolveConfirmDialogCopy(message);
   const confirmVariant = state.status === "idle" ? "default" : state.variant;
   const onCancel = () => respondToConfirmDialog(false);
@@ -81,27 +86,28 @@ export function ConfirmDialogHost() {
         if (!open) completeConfirmDialogClose();
       }}
     >
-      <AlertDialogPopup>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{copy.title}</AlertDialogTitle>
-          {copy.description ? (
-            <AlertDialogDescription className="whitespace-pre-line">
-              {copy.description}
-            </AlertDialogDescription>
-          ) : null}
-          {toolCall ? (
-            <ToolCallRequest
-              arguments={toolCall.arguments}
-              argumentDescriptions={toolCall.argumentDescriptions}
-            />
-          ) : null}
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant={confirmVariant} onClick={onConfirm}>
-            Confirm
-          </Button>
-        </AlertDialogFooter>
+      <AlertDialogPopup initialFocus={cancelRef}>
+        <div className="min-h-0 overflow-y-auto overscroll-contain">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{copy.title}</AlertDialogTitle>
+            {copy.description ? (
+              <AlertDialogDescription className="whitespace-pre-line">
+                {copy.description}
+              </AlertDialogDescription>
+            ) : null}
+            {toolCall ? <ToolCallDetails key={requestView.key} toolCall={toolCall} /> : null}
+          </AlertDialogHeader>
+        </div>
+        <div className="shrink-0">
+          <AlertDialogFooter>
+            <AlertDialogClose ref={cancelRef} render={<Button variant="outline" />}>
+              Cancel
+            </AlertDialogClose>
+            <Button variant={confirmVariant} onClick={onConfirm}>
+              Confirm
+            </Button>
+          </AlertDialogFooter>
+        </div>
       </AlertDialogPopup>
     </AlertDialog>
   );
