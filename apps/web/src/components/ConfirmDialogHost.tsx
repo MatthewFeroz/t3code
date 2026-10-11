@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
+import { ToolCallRequest } from "./ToolCallRequest";
 
 type ConfirmationCopy = {
   readonly title: string;
@@ -60,7 +61,12 @@ export function ConfirmDialogHost() {
 
   useEffect(() => registerConfirmDialogHost(), []);
 
-  const copy = resolveConfirmDialogCopy(state.status === "idle" ? "" : state.message);
+  const message = state.status === "idle" ? "" : state.message;
+  const toolCall = state.status === "idle" ? undefined : state.toolCall;
+  // A tool call's message is already the question; its description is the tool's.
+  const copy: ConfirmationCopy = toolCall
+    ? { title: message, description: toolCall.description ?? null }
+    : resolveConfirmDialogCopy(message);
   const confirmVariant = state.status === "idle" ? "default" : state.variant;
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
@@ -82,6 +88,12 @@ export function ConfirmDialogHost() {
             <AlertDialogDescription className="whitespace-pre-line">
               {copy.description}
             </AlertDialogDescription>
+          ) : null}
+          {toolCall ? (
+            <ToolCallRequest
+              arguments={toolCall.arguments}
+              argumentDescriptions={toolCall.argumentDescriptions}
+            />
           ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>

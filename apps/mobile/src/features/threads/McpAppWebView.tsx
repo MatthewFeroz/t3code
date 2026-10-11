@@ -8,6 +8,7 @@ import {
   type McpAppHost,
   type McpAppHostContext,
 } from "@t3tools/client-runtime/mcp-apps";
+import { summarizeMcpAppToolCall } from "@t3tools/client-runtime/mcp-apps/tool-call";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { CommandId, MessageId } from "@t3tools/contracts";
@@ -82,6 +83,40 @@ const commandFailure = (result: {
   return new McpAppHostRefusal(
     error instanceof Error && error.message.trim() !== "" ? error.message : "Request failed.",
   );
+};
+
+/**
+ * Asks before an app runs a tool: the tool's own description first, with the
+ * raw arguments one tap away rather than in the alert body.
+ */
+const confirmToolCall = (
+  server: string,
+  name: string,
+  info: { readonly title?: string; readonly tool?: unknown },
+  args: Record<string, unknown>,
+): Promise<boolean> => {
+  const { question, description } = summarizeMcpAppToolCall({
+    server,
+    name,
+    title: info.title,
+    tool: info.tool,
+  });
+  const request = JSON.stringify(args, null, 2);
+  return new Promise<boolean>((resolve) => {
+    Alert.alert(
+      question,
+      description ?? "",
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        {
+          text: "Show request",
+          onPress: () => void confirm(question, request, "Allow").then(resolve),
+        },
+        { text: "Allow", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
 };
 
 const confirm = (title: string, message: string, action: string) =>
@@ -329,14 +364,7 @@ export function ThreadMcpApp(props: {
         const info = await latest.current.toolInfo({ environmentId, input: { ...input, name } });
         if (info._tag !== "Success") throw commandFailure(info);
         if (!info.value.callable) throw new McpAppHostRefusal("This app cannot call that tool.");
-        if (
-          !info.value.readOnly &&
-          !(await confirm(
-            `Allow ${app.server} to run ${info.value.title ?? name}?`,
-            JSON.stringify(args, null, 2),
-            "Allow",
-          ))
-        ) {
+        if (!info.value.readOnly && !(await confirmToolCall(app.server, name, info.value, args))) {
           throw new McpAppHostRefusal("Declined by the user.");
         }
         const result = await latest.current.callTool({

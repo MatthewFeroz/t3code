@@ -55,6 +55,35 @@ describe("confirm dialog coordinator", () => {
     unregister();
   });
 
+  it("keeps a queued tool call's details through display and close", async () => {
+    const unregister = registerConfirmDialogHost();
+    const toolCall = {
+      description: "Upload diagram to excalidraw.com and return shareable URL.",
+      arguments: { json: "{}" },
+      argumentDescriptions: { json: "Serialized Excalidraw JSON" },
+    };
+    const first = requireConfirmation(requestConfirmDialog("Delete the project?"));
+    const second = requireConfirmation(
+      requestConfirmDialog("Allow excalidraw to run Export to excalidraw?", { toolCall }),
+    );
+
+    respondToConfirmDialog(false);
+    await expect(first).resolves.toBe(false);
+    completeConfirmDialogClose();
+    expect(readConfirmDialogState()).toEqual({
+      status: "confirming",
+      message: "Allow excalidraw to run Export to excalidraw?",
+      variant: "default",
+      toolCall,
+    });
+
+    respondToConfirmDialog(true);
+    await expect(second).resolves.toBe(true);
+    // The closing dialog keeps its content rather than flashing the plain layout.
+    expect(readConfirmDialogState()).toMatchObject({ status: "closing", toolCall });
+    unregister();
+  });
+
   it("serializes concurrent confirmations", async () => {
     const unregister = registerConfirmDialogHost();
     const first = requireConfirmation(requestConfirmDialog("Delete the project?"));

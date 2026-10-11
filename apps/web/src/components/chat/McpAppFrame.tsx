@@ -9,6 +9,7 @@ import {
   type McpAppHost,
   type McpAppHostContext,
 } from "@t3tools/client-runtime/mcp-apps";
+import { summarizeMcpAppToolCall } from "@t3tools/client-runtime/mcp-apps/tool-call";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   clampMcpAppHeight,
@@ -24,7 +25,11 @@ import { flushSync } from "react-dom";
 
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { APP_VERSION } from "~/branding";
-import { isConfirmDialogActive, requestConfirmDialog } from "~/confirmDialog";
+import {
+  type ConfirmDialogToolCall,
+  isConfirmDialogActive,
+  requestConfirmDialog,
+} from "~/confirmDialog";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { Button } from "~/components/ui/button";
 import { isElectron } from "~/env";
@@ -300,9 +305,12 @@ export function McpAppFrame(props: {
     };
     // Approvals render in the page, beneath the top layer a full-screen app
     // occupies, so the app returns inline before T3 asks.
-    const ask = async (message: string) => {
+    const ask = async (message: string, toolCall?: ConfirmDialogToolCall) => {
       flushSync(() => setDisplayMode("inline"));
-      const approved = await requestConfirmDialog(message);
+      const approved = await requestConfirmDialog(
+        message,
+        toolCall === undefined ? undefined : { toolCall },
+      );
       // No dialog host is mounted, so nobody was asked; say so rather than
       // reporting that the user declined.
       if (approved === undefined) {
@@ -328,9 +336,13 @@ export function McpAppFrame(props: {
         if (info._tag !== "Success") throw commandFailure(info);
         if (!info.value.callable) throw new McpAppHostRefusal("This app cannot call that tool.");
         if (!info.value.readOnly) {
-          const approved = await ask(
-            `Allow ${app.server} to run ${info.value.title ?? name}?\n${JSON.stringify(args, null, 2)}`,
-          );
+          const { question, ...summary } = summarizeMcpAppToolCall({
+            server: app.server,
+            name,
+            title: info.value.title,
+            tool: info.value.tool,
+          });
+          const approved = await ask(question, { ...summary, arguments: args });
           if (approved !== true) throw new McpAppHostRefusal("Declined by the user.");
         }
         const result = await latest.current.callTool({

@@ -1,23 +1,35 @@
 import type { ConfirmDialogOptions, ConfirmDialogVariant } from "@t3tools/contracts";
 
+/**
+ * A confirmation about a tool call: the message is the question, and the
+ * dialog adds what the tool does and its arguments, folded.
+ */
+export interface ConfirmDialogToolCall {
+  readonly description?: string;
+  readonly arguments: Readonly<Record<string, unknown>>;
+  readonly argumentDescriptions: Readonly<Record<string, string>>;
+}
+
 export type ConfirmDialogState =
   | { readonly status: "idle" }
-  | {
-      readonly status: "confirming";
-      readonly message: string;
-      readonly variant: ConfirmDialogVariant;
-    }
-  | {
-      readonly status: "closing";
-      readonly message: string;
-      readonly variant: ConfirmDialogVariant;
-    };
+  | ({ readonly status: "confirming" } & ConfirmDialogContent)
+  | ({ readonly status: "closing" } & ConfirmDialogContent);
 
-type PendingConfirmation = {
+type ConfirmDialogContent = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
+  readonly toolCall?: ConfirmDialogToolCall;
+};
+
+type PendingConfirmation = ConfirmDialogContent & {
   readonly resolve: (confirmed: boolean) => void;
 };
+
+const contentOf = (pending: PendingConfirmation): ConfirmDialogContent => ({
+  message: pending.message,
+  variant: pending.variant,
+  ...(pending.toolCall === undefined ? {} : { toolCall: pending.toolCall }),
+});
 
 const idleState: ConfirmDialogState = { status: "idle" };
 let state: ConfirmDialogState = idleState;
@@ -79,7 +91,7 @@ export function registerConfirmDialogHost(): () => void {
  */
 export function requestConfirmDialog(
   message: string,
-  options?: ConfirmDialogOptions,
+  options?: ConfirmDialogOptions & { readonly toolCall?: ConfirmDialogToolCall },
 ): Promise<boolean> | undefined {
   if (registeredHostCount === 0) return undefined;
 
@@ -87,6 +99,7 @@ export function requestConfirmDialog(
     const pending = {
       message,
       variant: options?.variant ?? "default",
+      ...(options?.toolCall === undefined ? {} : { toolCall: options.toolCall }),
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {
@@ -95,7 +108,7 @@ export function requestConfirmDialog(
     }
 
     activeConfirmation = pending;
-    publish({ status: "confirming", message, variant: pending.variant });
+    publish({ status: "confirming", ...contentOf(pending) });
   });
 
   return confirmation;
@@ -112,7 +125,7 @@ export function respondToConfirmDialog(confirmed: boolean): void {
   const confirmation = activeConfirmation;
   activeConfirmation = null;
   confirmation.resolve(confirmed);
-  publish({ status: "closing", message: state.message, variant: state.variant });
+  publish({ ...state, status: "closing" });
 }
 
 export function completeConfirmDialogClose(): void {
@@ -125,7 +138,7 @@ export function completeConfirmDialogClose(): void {
   }
 
   activeConfirmation = next;
-  publish({ status: "confirming", message: next.message, variant: next.variant });
+  publish({ status: "confirming", ...contentOf(next) });
 }
 
 export function resetConfirmDialogForTests(): void {
