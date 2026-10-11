@@ -6,7 +6,7 @@ import {
   parseEmbeddedJson,
   previewRequestScalar,
   summarizeRequestValue,
-} from "./ToolCallRequest.logic";
+} from "./request.ts";
 
 describe("parseEmbeddedJson", () => {
   it("unpacks a string that holds a JSON object or list", () => {

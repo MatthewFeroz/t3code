@@ -15,7 +15,7 @@ import {
   parseEmbeddedJson,
   previewRequestScalar,
   summarizeRequestValue,
-} from "./ToolCallRequest.logic";
+} from "@t3tools/client-runtime/mcp-apps/request";
 
 // A list shows this many items at a time; the rest are a click away.
 const LIST_PAGE = 100;

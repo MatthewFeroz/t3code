@@ -2,11 +2,20 @@ import {
   mcpAppToolCallHighlights,
   summarizeMcpAppToolCall,
 } from "@t3tools/client-runtime/mcp-apps/tool-call";
+import {
+  countRequestItemTypes,
+  formatRequestSize,
+  parseEmbeddedJson,
+  previewRequestScalar,
+  summarizeRequestValue,
+} from "@t3tools/client-runtime/mcp-apps/request";
+import * as Predicate from "effect/Predicate";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
+import { SymbolView } from "../../components/AppSymbol";
 
 type Approval = {
   readonly summary: ReturnType<typeof summarizeMcpAppToolCall>;
@@ -81,13 +90,11 @@ function McpAppToolApproval(props: {
   const insets = useSafeAreaInsets();
   const [showRequest, setShowRequest] = useState(false);
   const [showDescription, setShowDescription] = useState(false);
-  const [visibleArguments, setVisibleArguments] = useState(100);
   const [previous, setPrevious] = useState(request);
   if (previous !== request) {
     setPrevious(request);
     setShowRequest(false);
     setShowDescription(false);
-    setVisibleArguments(100);
   }
   const { question, identifier, description } = request.summary;
   const descriptionIsLong = description !== undefined && description.length > 300;
@@ -98,13 +105,15 @@ function McpAppToolApproval(props: {
         style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
       >
         <View className="max-h-full rounded-3xl bg-card">
-          <ScrollView className="shrink" contentContainerClassName="gap-3 p-6">
+          <View className="shrink-0 gap-2 border-b border-border px-6 py-4">
             <Text accessibilityRole="header" className="text-lg font-t3-medium">
               {question}
             </Text>
             <Text selectable className="text-xs text-foreground-muted">
               {identifier}
             </Text>
+          </View>
+          <ScrollView className="shrink" contentContainerClassName="gap-3 p-6">
             {description ? (
               <View className="gap-1">
                 <Text className="text-xs text-foreground-muted">Server description</Text>
@@ -136,24 +145,12 @@ function McpAppToolApproval(props: {
               onPress={() => setShowRequest((value) => !value)}
             >
               <Text className="text-sm text-primary-text">
-                {showRequest ? "Hide request" : "Show request"}
+                {showRequest ? "Hide request" : "Show request"} · {formatRequestSize(request.args)}
               </Text>
             </Pressable>
             {showRequest ? (
-              <View className="gap-3">
-                {Object.entries(request.args)
-                  .slice(0, visibleArguments)
-                  .map(([name, value]) => (
-                    <RequestArgument key={name} name={name} value={value} />
-                  ))}
-                {Object.keys(request.args).length > visibleArguments ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => setVisibleArguments((count) => count + 100)}
-                  >
-                    <Text className="text-sm text-primary-text">Show more arguments</Text>
-                  </Pressable>
-                ) : null}
+              <View className="rounded-xl border border-border p-3">
+                <RequestEntries entries={Object.entries(request.args)} />
               </View>
             ) : null}
           </ScrollView>
@@ -179,21 +176,94 @@ function McpAppToolApproval(props: {
   );
 }
 
-function RequestArgument({ name, value }: { readonly name: string; readonly value: unknown }) {
+function RequestArgument({ name, value: raw }: { readonly name: string; readonly value: unknown }) {
   const [expanded, setExpanded] = useState(false);
+  const value = parseEmbeddedJson(raw);
+  const entries = Array.isArray(value)
+    ? value.map((item, index) => [String(index), item] as const)
+    : Predicate.isObject(value)
+      ? Object.entries(value)
+      : undefined;
   const text =
-    typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value));
-  const isLong = text.length > 300;
+    entries !== undefined
+      ? ""
+      : typeof value === "string"
+        ? value
+        : (JSON.stringify(value) ?? String(value));
+  const canExpand = entries !== undefined || previewRequestScalar(value) !== text;
+  const summary =
+    entries === undefined
+      ? previewRequestScalar(value)
+      : previewRequestScalar(summarizeRequestValue(value));
+  const types = Array.isArray(value) ? countRequestItemTypes(value) : undefined;
+  const row = (
+    <View className="min-h-11 flex-row items-center gap-2 py-2">
+      {canExpand ? (
+        <SymbolView
+          name={expanded ? "chevron.down" : "chevron.right"}
+          size={12}
+          tintColorClassName="accent-icon-muted"
+        />
+      ) : null}
+      <View className="flex-1 gap-1">
+        <Text className="text-xs font-t3-medium">{name}</Text>
+        <Text selectable={!canExpand} className="text-xs text-foreground-secondary">
+          {summary}
+        </Text>
+        {raw !== value ? <Text className="text-xs text-foreground-muted">JSON</Text> : null}
+      </View>
+    </View>
+  );
   return (
-    <View className="gap-1">
-      <Text className="text-xs font-t3-medium">{name}</Text>
-      <Text selectable className="text-xs text-foreground-secondary">
-        {isLong && !expanded ? `${text.slice(0, 120)}…` : text}
-      </Text>
-      {isLong ? (
-        <Pressable accessibilityRole="button" onPress={() => setExpanded((current) => !current)}>
+    <View>
+      {canExpand ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${name}, ${summary}`}
+          accessibilityState={{ expanded }}
+          onPress={() => setExpanded((current) => !current)}
+        >
+          {row}
+        </Pressable>
+      ) : (
+        row
+      )}
+      {expanded ? (
+        <View className="border-l border-border pl-3">
+          {types ? <Text className="text-xs text-foreground-muted">{types}</Text> : null}
+          {entries ? (
+            <RequestEntries entries={entries} />
+          ) : (
+            <Text selectable className="text-xs text-foreground-secondary">
+              {text}
+            </Text>
+          )}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function RequestEntries({
+  entries,
+}: {
+  readonly entries: ReadonlyArray<readonly [string, unknown]>;
+}) {
+  const [shown, setShown] = useState(100);
+  return (
+    <View>
+      {entries.length === 0 ? <Text className="text-xs text-foreground-muted">Empty</Text> : null}
+      {entries.slice(0, shown).map(([name, value]) => (
+        <RequestArgument key={name} name={name} value={value} />
+      ))}
+      {entries.length > shown ? (
+        <Pressable
+          accessibilityRole="button"
+          className="min-h-11 justify-center"
+          onPress={() => setShown((count) => count + 100)}
+        >
           <Text className="text-sm text-primary-text">
-            {expanded ? "Collapse" : `Show full ${name}`}
+            Show {Math.min(100, entries.length - shown)} more of {entries.length - shown}
           </Text>
         </Pressable>
       ) : null}

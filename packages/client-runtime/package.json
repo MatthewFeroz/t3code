@@ -391,6 +391,10 @@
       "types": "./src/mcpApps/host.ts",
       "default": "./src/mcpApps/host.ts"
     },
+    "./mcp-apps/request": {
+      "types": "./src/mcpApps/request.ts",
+      "default": "./src/mcpApps/request.ts"
+    },
     "./mcp-apps/tool-call": {
       "types": "./src/mcpApps/toolCall.ts",
       "default": "./src/mcpApps/toolCall.ts"
