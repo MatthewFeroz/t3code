@@ -5979,6 +5979,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsComposerFocused(false);
     });
   };
+  const scheduleComposerCollapseCheckStable = useStableCallback(scheduleComposerCollapseCheck);
+
+  // Answering or dismissing a question unmounts the control that held focus,
+  // and React fires no blur for a removed element.
+  const activePendingUserInputRequestId = activePendingUserInput?.requestId ?? null;
+  useEffect(() => {
+    if (activePendingUserInputRequestId !== null) return;
+    scheduleComposerCollapseCheckStable();
+  }, [activePendingUserInputRequestId, scheduleComposerCollapseCheckStable]);
 
   useEffect(() => {
     return () => {
