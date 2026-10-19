@@ -1,3 +1,4 @@
+import * as NodeEvents from "node:events";
 import { it as effectIt } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER } from "@t3tools/contracts";
@@ -695,67 +696,45 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("keeps sign-in popups above their live host window", () =>
+  effectIt.effect("parents OAuth popups to the current live main window", () =>
     withManager((manager) =>
       Effect.gen(function* () {
+        const makeWindow = () =>
+          Object.assign(new NodeEvents.EventEmitter(), {
+            isDestroyed: vi.fn(() => false),
+            webContents: {},
+          });
+        const original = makeWindow();
+        const replacement = makeWindow();
         const preview = makeFaviconWebContents();
-        const hostWebContents = {};
-        const isDestroyed = vi.fn(() => false);
-        let closeMainWindow: (() => void) | undefined;
-        const mainWindow = {
-          isDestroyed,
-          once: vi.fn((event: string, listener: () => void) => {
-            if (event === "closed") closeMainWindow = listener;
-          }),
-          webContents: hostWebContents,
-        };
-        Object.assign(preview.webContents, { hostWebContents });
+        Object.assign(preview.webContents, { hostWebContents: original.webContents });
         fromId.mockReturnValue(preview.webContents);
-        yield* manager.setMainWindow(mainWindow as never);
-        yield* manager.createTab("tab_popup_owner");
-        yield* manager.registerWebview("tab_popup_owner", 42);
-
-        const open = vi
-          .mocked((preview.webContents as Electron.WebContents).setWindowOpenHandler)
-          .mock.calls.at(-1)![0];
+        yield* manager.setMainWindow(original as never);
+        yield* manager.createTab("tab_oauth");
+        yield* manager.registerWebview("tab_oauth", 42);
+        const open = vi.mocked((preview.webContents as Electron.WebContents).setWindowOpenHandler)
+          .mock.lastCall![0];
         const request = {
           url: "https://accounts.google.com/o/oauth2/auth",
           disposition: "new-window",
         } as Electron.HandlerDetails;
+
         const result = open(request);
-        expect(result.action).toBe("allow");
-        expect(result.overrideBrowserWindowOptions?.parent).toBe(mainWindow);
-        expect(result.overrideBrowserWindowOptions?.webPreferences).toMatchObject({
-          sandbox: true,
-          nodeIntegration: false,
-          contextIsolation: true,
+        expect(result).toMatchObject({
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            parent: original,
+            webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true },
+          },
         });
-        expect(result.overrideBrowserWindowOptions?.alwaysOnTop).not.toBe(true);
         expect(result.overrideBrowserWindowOptions?.modal).not.toBe(true);
+        expect(result.overrideBrowserWindowOptions?.alwaysOnTop).not.toBe(true);
 
-        isDestroyed.mockReturnValue(true);
-        expect(open(request).overrideBrowserWindowOptions?.parent).toBeUndefined();
-
-        const replacementIsDestroyed = vi.fn(() => false);
-        let closeReplacementWindow: (() => void) | undefined;
-        const replacementWindow = {
-          isDestroyed: replacementIsDestroyed,
-          once: vi.fn((event: string, listener: () => void) => {
-            if (event === "closed") closeReplacementWindow = listener;
-          }),
-          webContents: {},
-        };
-        isDestroyed.mockReturnValue(false);
-        yield* manager.setMainWindow(replacementWindow as never);
-        expect(open(request).overrideBrowserWindowOptions?.parent).toBe(replacementWindow);
-        isDestroyed.mockReturnValue(true);
-        closeMainWindow?.();
-        expect(open(request).overrideBrowserWindowOptions?.parent).toBe(replacementWindow);
-
-        replacementIsDestroyed.mockReturnValue(true);
-        expect(open(request).overrideBrowserWindowOptions?.parent).toBeUndefined();
-        replacementIsDestroyed.mockReturnValue(false);
-        closeReplacementWindow?.();
+        yield* manager.setMainWindow(replacement as never);
+        expect(open(request).overrideBrowserWindowOptions?.parent).toBe(replacement);
+        original.emit("closed");
+        expect(open(request).overrideBrowserWindowOptions?.parent).toBe(replacement);
+        replacement.isDestroyed.mockReturnValue(true);
         expect(open(request).overrideBrowserWindowOptions?.parent).toBeUndefined();
       }),
     ),

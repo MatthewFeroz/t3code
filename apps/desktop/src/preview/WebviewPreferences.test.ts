@@ -20,10 +20,13 @@ function parseWebPreferences(input: string): Record<string, unknown> {
 describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
   const parsed = parseWebPreferences(PREVIEW_WEBVIEW_PREFERENCES);
 
-  it("contains the security-critical keys and disabled Blink features", () => {
-    expect(Object.keys(parsed).toSorted()).toEqual(
-      ["contextIsolation", "nodeIntegration", "sandbox", "disableBlinkFeatures"].toSorted(),
-    );
+  it("preserves guest security preferences and disables unsupported FedCM", () => {
+    expect(parsed).toEqual({
+      contextIsolation: "false",
+      nodeIntegration: "false",
+      sandbox: "true",
+      disableBlinkFeatures: "FedCm",
+    });
   });
 
   it("uses canonical JS-boolean string literals (not yes/no, on/off, 1/0)", () => {
@@ -45,10 +48,6 @@ describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
 
   it("disables nodeIntegration (defense in depth — page never gets Node)", () => {
     expect(parsed["nodeIntegration"]).toBe("false");
-  });
-
-  it("disables the unsupported browser-owned FedCM dialog", () => {
-    expect(parsed["disableBlinkFeatures"]).toBe("FedCm");
   });
 
   it("contains no whitespace (Electron's parser does not trim)", () => {

@@ -1585,9 +1585,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.setWindowOpenHandler((details) => {
           const action = previewWindowOpenAction(details);
           if (action === "popup") {
-            // An owned window stays above T3 when a later click refocuses the
-            // preview. Without an owner, OAuth can appear to do nothing while
-            // its existing account chooser is hidden behind the main window.
+            // Ownership keeps OAuth popups above T3 when the preview regains focus.
             return {
               action: "allow",
               overrideBrowserWindowOptions: {
