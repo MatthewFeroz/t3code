@@ -22,6 +22,7 @@ export interface ProviderTextDeltaCoalescer {
     readonly itemId: string;
     readonly finalText?: string;
     readonly emitEmpty?: boolean;
+    readonly completePrevious?: boolean;
   }) => Effect.Effect<string>;
   readonly flushTurn: (turnId: string) => Effect.Effect<void>;
 }
@@ -128,11 +129,42 @@ export const makeProviderTextDeltaCoalescer = Effect.fn("makeProviderTextDeltaCo
                 }
               }),
             ),
-      complete: ({ turnId, itemId, finalText, emitEmpty = true }) =>
+      complete: ({ turnId, itemId, finalText, emitEmpty = true, completePrevious = false }) =>
         flushLock.withPermit(
           Effect.gen(function* () {
             const key = providerTextBufferKey(turnId, itemId);
-            const existing = (yield* Ref.get(buffered)).get(key);
+            const current = yield* Ref.get(buffered);
+            const earlier: Array<BufferedProviderText> = [];
+            if (completePrevious) {
+              for (const message of current.values()) {
+                if (message.turnId !== turnId) continue;
+                if (message.itemId === itemId) break;
+                earlier.push(message);
+              }
+            }
+            // Durable timeline positions follow first publication, so an abandoned
+            // draft must reach the projection before a newer answer completes.
+            yield* Effect.forEach(
+              earlier,
+              (message) =>
+                input.emit({
+                  turnId: message.turnId,
+                  itemId: message.itemId,
+                  text: message.text,
+                  completed: true,
+                }),
+              { discard: true },
+            );
+            if (earlier.length > 0) {
+              yield* Ref.update(buffered, (messages) => {
+                const next = new Map(messages);
+                for (const message of earlier) {
+                  next.delete(providerTextBufferKey(turnId, message.itemId));
+                }
+                return next;
+              });
+            }
+            const existing = current.get(key);
             const text = finalText !== undefined ? finalText : (existing?.text ?? "");
             if (emitEmpty || text.length > 0) {
               yield* input.emit({ turnId, itemId, text, completed: true });

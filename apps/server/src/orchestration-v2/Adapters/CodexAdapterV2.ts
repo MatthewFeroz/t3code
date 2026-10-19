@@ -4999,6 +4999,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               turnId: payload.turnId,
               itemId: payload.item.id,
               finalText: payload.item.text,
+              completePrevious: finalAnswer,
             });
             yield* Ref.update(finalAnswerItemIdsByTurn, (current) => {
               const itemIds = current.get(payload.turnId);

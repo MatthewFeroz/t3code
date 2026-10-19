@@ -279,6 +279,72 @@ describe("CodexAdapterV2 assistant message streaming", () => {
     }),
   );
 
+  it.effect("publishes an earlier unfinished item before a later item completes", () =>
+    Effect.gen(function* () {
+      const updates = yield* Ref.make<ReadonlyArray<ProviderTextDeltaUpdate>>([]);
+      const coalescer = yield* makeProviderTextDeltaCoalescer({
+        flushIntervalMs: 50,
+        emit: (update) => Ref.update(updates, (current) => [...current, update]),
+      });
+
+      yield* coalescer.append({
+        turnId: "turn-1",
+        itemId: "draft",
+        delta: "The files are intact and",
+      });
+      yield* coalescer.append({
+        turnId: "turn-1",
+        itemId: "answer",
+        delta: "Files copied to the Mac.",
+      });
+      yield* coalescer.complete({ turnId: "turn-1", itemId: "answer", completePrevious: true });
+
+      assert.deepEqual(yield* Ref.get(updates), [
+        { turnId: "turn-1", itemId: "draft", text: "The files are intact and", completed: true },
+        { turnId: "turn-1", itemId: "answer", text: "Files copied to the Mac.", completed: true },
+      ]);
+      yield* coalescer.flushTurn("turn-1");
+      assert.equal((yield* Ref.get(updates)).length, 2);
+    }),
+  );
+
+  it.effect("completes a previous item even when its streaming update was deferred", () =>
+    Effect.gen(function* () {
+      const updates = yield* Ref.make<ReadonlyArray<ProviderTextDeltaUpdate>>([]);
+      const coalescer = yield* makeProviderTextDeltaCoalescer({
+        flushIntervalMs: 50,
+        emit: (update) =>
+          update.completed ? Ref.update(updates, (current) => [...current, update]) : Effect.void,
+      });
+      yield* coalescer.append({ turnId: "other-turn", itemId: "other", delta: "Other turn" });
+      yield* coalescer.append({
+        turnId: "turn-1",
+        itemId: "draft",
+        delta: "The files are intact and",
+      });
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("50 millis");
+      yield* Effect.yieldNow;
+      yield* coalescer.complete({
+        turnId: "turn-1",
+        itemId: "answer",
+        finalText: "Files copied to the Mac.",
+        completePrevious: true,
+      });
+      assert.deepEqual(yield* Ref.get(updates), [
+        {
+          turnId: "turn-1",
+          itemId: "draft",
+          text: "The files are intact and",
+          completed: true,
+        },
+        { turnId: "turn-1", itemId: "answer", text: "Files copied to the Mac.", completed: true },
+      ]);
+      yield* coalescer.flushTurn("turn-1");
+      assert.equal((yield* Ref.get(updates)).length, 2);
+    }),
+  );
+
   it.effect("retains buffered text until completion updates are emitted", () =>
     Effect.gen(function* () {
       const updates = yield* Ref.make<ReadonlyArray<ProviderTextDeltaUpdate>>([]);
@@ -4066,6 +4132,96 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ],
     });
   };
+
+  it.effect("keeps an abandoned streamed draft before the replacement final answer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const scenario = "codex-abandoned-draft-order";
+        const nativeThreadId = `native-${scenario}-thread`;
+        const nativeTurnId = `native-${scenario}-turn`;
+        const transcript = finalAnswerTranscript(scenario, [
+          { id: "answer", text: "Files copied to the Mac.", streamed: true },
+        ]);
+        const answerStart = transcript.entries.findIndex(
+          (entry) => entry.type === "emit_inbound" && entry.label === "item/started/answer",
+        );
+        const draftEntries: ReadonlyArray<CodexReplay.CodexAppServerReplayEntry> = [
+          {
+            type: "emit_inbound",
+            label: "item/started/draft",
+            frame: {
+              method: "item/started",
+              params: {
+                threadId: nativeThreadId,
+                turnId: nativeTurnId,
+                startedAtMs: 1782622440000,
+                item: {
+                  type: "agentMessage",
+                  id: "draft",
+                  text: "",
+                  phase: "final_answer",
+                  memoryCitation: null,
+                },
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            label: "item/agentMessage/delta/draft",
+            frame: {
+              method: "item/agentMessage/delta",
+              params: {
+                threadId: nativeThreadId,
+                turnId: nativeTurnId,
+                itemId: "draft",
+                delta: "The files are intact and",
+              },
+            },
+          },
+        ];
+        const harness = yield* makeCodexReplayHarness({
+          ...transcript,
+          entries: [
+            ...transcript.entries.slice(0, answerStart),
+            ...draftEntries,
+            ...transcript.entries.slice(answerStart),
+          ],
+        });
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-${scenario}`),
+            text: "Reply with the requested recovery marker.",
+          }),
+        );
+        yield* harness.firstTerminal;
+
+        // Durable positions are assigned on first publication, not from provider ordinals.
+        const firstPublished = new Map(
+          assistantTurnItems(harness.events).map((item) => [item.id, item]),
+        );
+        assert.deepEqual(
+          [...firstPublished.values()].map((item) => item.nativeItemRef?.nativeId),
+          ["draft", "answer"],
+        );
+        const completed = new Map(
+          assistantTurnItems(harness.events)
+            .filter((item) => !item.streaming)
+            .map((item) => [item.id, item.text]),
+        );
+        assert.deepEqual(
+          [...firstPublished.keys()].map((id) => completed.get(id)),
+          ["The files are intact and", "Files copied to the Mac."],
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
 
   it.effect("suppresses a trailing empty final answer after a non-empty final answer", () =>
     Effect.scoped(
