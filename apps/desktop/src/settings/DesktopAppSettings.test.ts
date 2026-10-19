@@ -278,12 +278,12 @@ describe("DesktopSettings", () => {
     ),
   );
 
-  it.effect("preserves compositor bounds below the requested minimum", () =>
+  it.effect("persists and reloads compositor bounds below the preferred minimum", () =>
     withSettings(
       Effect.gen(function* () {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
         const mainWindowBounds = { x: 12, y: 563, width: 280, height: 240 };
-        yield* writeSettingsPatch({ mainWindowBounds });
+        yield* settings.setMainWindowBounds(mainWindowBounds, false);
         const loaded = yield* settings.load;
         assert.deepEqual(loaded.mainWindowBounds, mainWindowBounds);
       }),

@@ -48,12 +48,7 @@ export interface DesktopSettingsChange {
 }
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
-export const MIN_MAIN_WINDOW_SIZE = {
-  width: 360,
-  height: 320,
-} as const;
-// A compositor can assign less than the requested minimum. Preserve its actual
-// bounds; the native window options enforce the preferred minimum at creation.
+// Compositors can assign bounds smaller than the requested native minimum.
 export const DesktopWindowBoundsSchema = Schema.Struct({
   x: Schema.Int,
   y: Schema.Int,

@@ -55,6 +55,7 @@ function syncMacosWindowButtons(window: Electron.BrowserWindow): void {
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
+const MIN_MAIN_WINDOW_SIZE = { width: 360, height: 320 } as const;
 const MAIN_WINDOW_BOUNDS_PERSIST_DEBOUNCE_MS = 500;
 const DEVELOPMENT_LOAD_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 const RENDERER_RECOVERY_RELOAD_DELAY_MS = 500;
@@ -164,6 +165,7 @@ function windowBoundsEqual(
 export function resolveInitialMainWindowBounds(
   persistedBounds: DesktopAppSettings.DesktopWindowBounds | null,
   displays: readonly DisplayBounds[],
+  primaryWorkArea: DisplayBounds | null = null,
 ): DesktopAppSettings.DesktopWindowBounds | typeof DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE {
   if (
     persistedBounds !== null &&
@@ -171,7 +173,7 @@ export function resolveInitialMainWindowBounds(
   ) {
     return persistedBounds;
   }
-  const display = displays[0];
+  const display = primaryWorkArea;
   const defaults = DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
   if (!display || (defaults.width <= display.width && defaults.height <= display.height)) {
     return defaults;
@@ -371,7 +373,8 @@ export const make = Effect.gen(function* () {
       try {
         return {
           _tag: "Success" as const,
-          bounds: Electron.screen.getAllDisplays().map((display) => display.workArea),
+          bounds: Electron.screen.getAllDisplays().map((display) => display.bounds),
+          primaryWorkArea: Electron.screen.getPrimaryDisplay().workArea,
         };
       } catch (cause) {
         return { _tag: "Failure" as const, cause };
@@ -383,16 +386,19 @@ export const make = Effect.gen(function* () {
         : yield* logWindowWarning("failed to read connected displays; using defaults", {
             cause: displayBoundsResult.cause,
           }).pipe(Effect.as<readonly Electron.Rectangle[]>([]));
-    const initialBounds = resolveInitialMainWindowBounds(persistedBounds, displayBounds);
+    const initialBounds = resolveInitialMainWindowBounds(
+      persistedBounds,
+      displayBounds,
+      displayBoundsResult._tag === "Success" ? displayBoundsResult.primaryWorkArea : null,
+    );
     const restoredPersistedBounds = persistedBounds !== null && initialBounds === persistedBounds;
     if (persistedBounds !== null && !restoredPersistedBounds) {
       yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
     }
     const window = yield* electronWindow.create({
       ...initialBounds,
-      // Let small displays and tiling compositors reach the responsive layout.
-      minWidth: Math.min(DesktopAppSettings.MIN_MAIN_WINDOW_SIZE.width, initialBounds.width),
-      minHeight: Math.min(DesktopAppSettings.MIN_MAIN_WINDOW_SIZE.height, initialBounds.height),
+      minWidth: Math.min(MIN_MAIN_WINDOW_SIZE.width, initialBounds.width),
+      minHeight: Math.min(MIN_MAIN_WINDOW_SIZE.height, initialBounds.height),
       show: false,
       autoHideMenuBar: true,
       ...(environment.platform === "darwin" ? { disableAutoHideCursor: true } : {}),
