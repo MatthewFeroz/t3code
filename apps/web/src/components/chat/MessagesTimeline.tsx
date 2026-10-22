@@ -196,6 +196,7 @@ interface MessagesTimelineProps {
   footer?: ReactNode;
 
   listRef: React.RefObject<LegendListRef | null>;
+  onScrollNodeChange?: ((node: HTMLElement | null) => void) | undefined;
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestRun: TimelineLatestRun | null;
   runningRunId?: RunId | null;
@@ -301,6 +302,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   isCompacting = false,
   awaitingUser = false,
   listRef,
+  onScrollNodeChange,
   timelineEntries,
   findExpanded = false,
   findQuery = "",
@@ -983,7 +985,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const registerTimeline = canvas?.registerTimeline;
   const setTimelineList = (list: LegendListRef | null) => {
     listRef.current = list;
-    registerTimeline?.(list?.getScrollableNode() ?? null);
+    const scrollNode = list?.getScrollableNode() ?? null;
+    registerTimeline?.(scrollNode);
+    onScrollNodeChange?.(scrollNode);
   };
 
   useThreadFindPositionReader({
