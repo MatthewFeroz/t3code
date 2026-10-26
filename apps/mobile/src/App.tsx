@@ -7,7 +7,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
-  createNavigationContainerRef,
   createStaticNavigation,
   getActionFromState,
   getStateFromPath,
@@ -51,6 +50,10 @@ import {
 } from "./features/workspace/workspace-selection-store";
 import { workspaceDetailLinkAction } from "./features/workspace/workspace-detail-selection";
 import { NativeLayoutMetricsProvider } from "./native/native-layout-metrics";
+import {
+  flushRootNavigationReady,
+  rootNavigationRef,
+} from "./features/layout/root-navigation-ready";
 
 import "../global.css";
 
@@ -83,7 +86,6 @@ const appLinking = {
 };
 
 const Navigation = createStaticNavigation(RootStack);
-const navigationRef = createNavigationContainerRef();
 
 declare const module: { readonly hot?: FoundationHotModule } | undefined;
 
@@ -145,9 +147,12 @@ function AppContent() {
                 <NativeLayoutMetricsProvider>
                   <IncomingShareProvider>
                     <Navigation
-                      ref={navigationRef}
+                      ref={rootNavigationRef}
                       linking={appLinking}
-                      onReady={() => recordWorkspaceSelections(navigationRef.getRootState())}
+                      onReady={() => {
+                        recordWorkspaceSelections(rootNavigationRef.getRootState());
+                        flushRootNavigationReady();
+                      }}
                       theme={navigationTheme}
                       onStateChange={recordWorkspaceSelections}
                     />
