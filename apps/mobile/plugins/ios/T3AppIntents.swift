@@ -1,5 +1,5 @@
 import AppIntents
-import T3NativeControls
+internal import T3NativeControls
 
 // App Shortcuts must be compiled into the app target; static pods do not ship App Intents metadata.
 
