@@ -1,10 +1,10 @@
+import * as Dialog from "../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback } from "react";
-import { Alert } from "react-native";
 
 import { useConnectionController } from "../features/connection/useConnectionController";
 import { environmentPresentations } from "./presentation";
@@ -36,6 +36,14 @@ const remoteEnvironmentProjections = createRemoteEnvironmentProjectionAtoms({
   preparedConnectionAtom: environmentSession.preparedConnectionValueAtom,
   serverConfigAtom: serverEnvironment.configValueAtom,
 });
+
+export const environmentConnectedAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make(
+    (get) =>
+      get(remoteEnvironmentProjections.runtimeStateAtom(environmentId))?.connectionState ===
+      "connected",
+  ).pipe(Atom.withLabel(`mobile:environment-connected:${environmentId}`)),
+);
 
 const EMPTY_SAVED_CONNECTION_ATOM = Atom.make<SavedRemoteConnection | null>(null).pipe(
   Atom.withLabel("mobile:saved-connection:empty"),
@@ -110,10 +118,10 @@ export function useRemoteConnections() {
   }, []);
 
   const onConnectPress = useCallback(
-    async (pairingUrl?: string) => {
+    async (pairingUrl?: string, expectedEnvironmentId?: EnvironmentId) => {
       const nextPairingUrl = pairingUrl ?? connectionPairingUrl;
       setPendingConnectionError(null);
-      const result = await controller.connectPairingUrl(nextPairingUrl);
+      const result = await controller.connectPairingUrl(nextPairingUrl, expectedEnvironmentId);
       if (AsyncResult.isFailure(result)) {
         const error = Cause.squash(result.cause);
         const message =
@@ -124,7 +132,7 @@ export function useRemoteConnections() {
           "reason" in error &&
           error.reason === "unsupported"
         ) {
-          Alert.alert("Client not supported", message);
+          Dialog.alert("Client not supported", message);
         } else {
           setPendingConnectionError(message);
         }
@@ -168,24 +176,22 @@ export function useRemoteConnections() {
           void controller.removeEnvironment(environmentId);
         },
       } as const;
-      // Removing a T3 Connect environment here leaves its account registration
-      // and host space, so point to where it can be deregistered.
       if (environment.isRelayManaged) {
-        Alert.alert(
+        Dialog.alert(
           "Remove from this device?",
           `Forget ${environment.environmentLabel} and its cached threads on this device.\n\nIt stays on your T3 Connect account and keeps its host space. Deregister it under T3 Account → T3 Connect to free it.`,
           [
             { text: "Cancel", style: "cancel" },
             {
               text: "Open T3 Account",
-              onPress: () => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" }),
+              onPress: () => navigation.navigate("SettingsAuth"),
             },
             remove,
           ],
         );
         return;
       }
-      Alert.alert(
+      Dialog.alert(
         "Remove from this device?",
         `Forget ${environment.environmentLabel} and its cached threads on this device. Switch it off instead to keep it saved.`,
         [{ text: "Cancel", style: "cancel" }, remove],
