@@ -259,6 +259,7 @@ export interface ThreadComposerProps {
   readonly canSteerActiveTurn: boolean;
   readonly hidden: boolean;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
+  readonly autoFocus?: boolean;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftMedia: () => Promise<void>;
   readonly onPickDraftFiles: () => Promise<void>;
@@ -1048,6 +1049,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             >
               <ComposerEditor
                 hidden={props.hidden}
+                autoFocus={props.autoFocus ?? false}
                 draftKey={composerDraftKey}
                 environmentId={props.environmentId}
                 onOpenMention={(path) => {

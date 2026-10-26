@@ -207,6 +207,7 @@ export interface ThreadDetailScreenProps {
     ) => React.ReactNode;
     readonly controls: React.ReactNode;
     readonly editorRef: React.RefObject<ComposerEditorHandle | null>;
+    readonly autoFocus: boolean;
     readonly sendBlockedReason: string | null;
     readonly interactionLocked: boolean;
   };
@@ -1572,6 +1573,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                         canOperateThread={props.canOperateThread}
                         reportedModelSelection={reportedModelSelection}
                         editorRef={composerEditorRef}
+                        autoFocus={props.draftMode?.autoFocus ?? false}
                         placeholder={
                           props.activePendingApproval
                             ? props.activePendingApproval.supportsFeedback
