@@ -455,11 +455,12 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   const composerEditorRef = props.draftMode?.editorRef ?? defaultComposerEditorRef;
   const isProviderSubagent = isProviderNativeSubagentThread(props.selectedThread.source);
   const editingRunId = props.queuedRunEdit?.runId ?? null;
+  const autoFocusDraftKey = props.draftMode?.autoFocus ? props.composerDraftKey : null;
   useEffect(() => {
-    if (editingRunId === null) return;
+    if (editingRunId === null && !autoFocusDraftKey) return;
     const frame = requestAnimationFrame(() => composerEditorRef.current?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [editingRunId, composerEditorRef]);
+  }, [editingRunId, autoFocusDraftKey, composerEditorRef]);
   const composerOverlayRef = useRef<ViewInstance>(null);
   const listRef = useRef<LegendListRef>(null);
   const feedTouchStartRef = useRef<{ pageX: number; pageY: number } | null>(null);

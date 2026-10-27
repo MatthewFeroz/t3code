@@ -8,7 +8,7 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, ThreadId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { useFocusEffect } from "@react-navigation/native";
+import { StackActions, useFocusEffect } from "@react-navigation/native";
 import { NavigationContext, NavigationRouteContext, useNavigation } from "@react-navigation/native";
 import {
   use,
@@ -556,7 +556,9 @@ function AdaptiveWorkspaceLayoutContent(
   useNewTaskAppIntent(() => {
     const requestId = uuidv4();
     requestNewTaskComposerFocus(requestId);
-    openNewTask(requestId);
+    navigation.dispatch(
+      StackActions.push("NewTaskProject", { startWithoutProject: true, requestId }),
+    );
   });
 
   // Create at root: the iOS sidebar renders in an independent navigation tree.
