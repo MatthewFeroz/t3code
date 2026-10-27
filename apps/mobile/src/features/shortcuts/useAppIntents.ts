@@ -1,7 +1,7 @@
 import { requireOptionalNativeModule } from "expo";
 import { useEffect, useEffectEvent } from "react";
 
-import { whenRootNavigationReady } from "../layout/root-navigation-ready";
+import { whenRootNavigationReady } from "../../lib/rootNavigation";
 
 // iOS-only: Android has no Action button and uses the "New task" launcher shortcut instead.
 const AppIntents = requireOptionalNativeModule<{
@@ -20,14 +20,17 @@ export function useNewTaskAppIntent(onNewTask: () => void): void {
   // oxlint-disable-next-line t3code/react-effect-budget -- Drains intents queued natively before JS mounted, then listens for new ones.
   useEffect(() => {
     if (!AppIntents) return;
-    let cancel = whenRootNavigationReady(handlePendingIntent);
-    const subscription = AppIntents.addListener("onIntent", () => {
-      cancel();
-      cancel = whenRootNavigationReady(handlePendingIntent);
-    });
+    let mounted = true;
+    const drain = () =>
+      whenRootNavigationReady(() => {
+        if (mounted) handlePendingIntent();
+      });
+    // Subscribe before the first drain so an intent delivered in between still fires an event.
+    const subscription = AppIntents.addListener("onIntent", drain);
+    drain();
     return () => {
+      mounted = false;
       subscription.remove();
-      cancel();
     };
   }, []);
 }
