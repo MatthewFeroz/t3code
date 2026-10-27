@@ -103,7 +103,9 @@ function PendingSecretRequestForm(props: {
       autoComplete="off"
       onPointerDown={(event) => {
         if (!(event.target instanceof HTMLElement)) return;
-        if (event.target.closest("input, button, a")) return;
+        // Pressing text would move focus and cancel the selection, so the
+        // reason (often a URL to copy) stays selectable.
+        if (event.target.closest("input, button, a, p")) return;
         document.getElementById(inputId)?.focus();
       }}
     >
@@ -111,7 +113,9 @@ function PendingSecretRequestForm(props: {
         <label htmlFor={inputId} className="text-sm font-medium text-foreground">
           {item.label}
         </label>
-        {item.reason.trim() ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
+        {item.reason.trim() ? (
+          <p className="text-sm wrap-anywhere text-muted-foreground">{item.reason}</p>
+        ) : null}
       </div>
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 flex-1">
