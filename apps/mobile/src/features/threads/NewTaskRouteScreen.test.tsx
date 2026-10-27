@@ -19,6 +19,7 @@ const { Children, state, project } = vi.hoisted(() => ({
     paired: true,
     scratchSupported: true,
     reconnecting: false,
+    focused: true,
     openScratch: vi.fn(),
     selectDetail: vi.fn(),
     setProject: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("@react-navigation/native", () => ({
         { name: "NewTaskProject" },
       ],
     }),
+    isFocused: () => state.focused,
   }),
   useIsFocused: () => true,
 }));
@@ -120,6 +122,7 @@ async function setup(
   state.scratchSupported = options.scratchSupported ?? true;
   state.reconnecting = options.reconnecting ?? false;
   state.paired = options.paired ?? true;
+  state.focused = true;
   state.connected = state.paired && !state.loading;
   const result =
     Promise.withResolvers<
@@ -180,6 +183,20 @@ it("opens the no-project workspace once and preserves the shortcut focus request
       },
     },
   });
+});
+
+it("leaves navigation to a newer shortcut's picker when its no-project workspace opens", async () => {
+  await using screen = await setup();
+  state.focused = false;
+  await act(async () =>
+    screen.result.resolve(
+      AsyncResult.success({
+        environmentId: EnvironmentId.make("environment"),
+        id: ProjectId.make("scratch"),
+      }),
+    ),
+  );
+  expect(state.selectDetail).not.toHaveBeenCalled();
 });
 
 it("waits for cold-launch connections before opening the no-project workspace", async () => {
