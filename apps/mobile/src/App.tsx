@@ -1,4 +1,6 @@
 import { installPermissionUpdateNotice } from "./features/connection/permissionUpdateNotice";
+import { installComposerAttachmentUploads } from "./state/composer-attachment-uploads";
+import { installThreadOutboxDelivery } from "./state/threadOutboxDelivery";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
@@ -10,6 +12,7 @@ import {
   createStaticNavigation,
   getActionFromState,
   getStateFromPath,
+  type NavigationState,
 } from "@react-navigation/native";
 
 import { RegistryContext } from "@effect/atom-react";
@@ -39,7 +42,6 @@ import {
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 import { useUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
-import { VoiceInputProvider } from "./features/voice-input/VoiceInputProvider";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
 import { restoreSettingsLinkState } from "./features/settings/settings-navigation";
 import {
@@ -50,10 +52,9 @@ import {
 } from "./features/workspace/workspace-selection-store";
 import { workspaceDetailLinkAction } from "./features/workspace/workspace-detail-selection";
 import { NativeLayoutMetricsProvider } from "./native/native-layout-metrics";
-import {
-  flushRootNavigationReady,
-  rootNavigationRef,
-} from "./features/layout/root-navigation-ready";
+import { attachRootNavigation, rootNavigationRef } from "./lib/rootNavigation";
+import { flushRootNavigationReady } from "./features/layout/root-navigation-ready";
+import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
 
 import "../global.css";
 
@@ -87,13 +88,26 @@ const appLinking = {
 
 const Navigation = createStaticNavigation(RootStack);
 
+function handleNavigationStateChange(state: NavigationState | undefined): void {
+  recordWorkspaceSelections(state);
+  if (state) pruneNewTaskBranchCheckouts(state);
+}
+
+function handleNavigationReady(): void {
+  handleNavigationStateChange(rootNavigationRef.getRootState());
+  flushRootNavigationReady();
+}
+
 declare const module: { readonly hot?: FoundationHotModule } | undefined;
 
-const disposePermissionUpdateNotice = installPermissionUpdateNotice();
-disposeOnFoundationReplace(
-  typeof module === "undefined" ? undefined : module.hot,
-  disposePermissionUpdateNotice,
-);
+const appServiceDisposers = [
+  installPermissionUpdateNotice(),
+  installThreadOutboxDelivery(),
+  installComposerAttachmentUploads(),
+];
+disposeOnFoundationReplace(typeof module === "undefined" ? undefined : module.hot, () => {
+  for (const dispose of appServiceDisposers) dispose();
+});
 
 function SplashScreenCoordinator() {
   const { isReady } = useAppearancePreferences();
@@ -140,30 +154,25 @@ function AppContent() {
       <GestureHandlerRootView className="flex-1">
         <KeyboardProvider statusBarTranslucent>
           <SafeAreaProvider>
-            <VoiceInputProvider>
-              <StatusBar barStyle={themeAppearance === "dark" ? "light-content" : "dark-content"} />
-              {/* native-stack needs the theme's dark flag to select dark native headers. */}
-              <GlobalVoiceInputControl>
-                <NativeLayoutMetricsProvider>
-                  <IncomingShareProvider>
-                    <Navigation
-                      ref={rootNavigationRef}
-                      linking={appLinking}
-                      onReady={() => {
-                        recordWorkspaceSelections(rootNavigationRef.getRootState());
-                        flushRootNavigationReady();
-                      }}
-                      theme={navigationTheme}
-                      onStateChange={recordWorkspaceSelections}
-                    />
-                  </IncomingShareProvider>
-                  <Dialog.Host />
-                  <ThreadArrangementHost />
-                  <ProjectChipIconRasterizer />
-                </NativeLayoutMetricsProvider>
-              </GlobalVoiceInputControl>
-              <OverlayPortalHost />
-            </VoiceInputProvider>
+            <StatusBar barStyle={themeAppearance === "dark" ? "light-content" : "dark-content"} />
+            {/* native-stack needs the theme's dark flag to select dark native headers. */}
+            <GlobalVoiceInputControl>
+              <NativeLayoutMetricsProvider>
+                <IncomingShareProvider>
+                  <Navigation
+                    ref={attachRootNavigation}
+                    linking={appLinking}
+                    onReady={handleNavigationReady}
+                    theme={navigationTheme}
+                    onStateChange={handleNavigationStateChange}
+                  />
+                </IncomingShareProvider>
+                <Dialog.Host />
+                <ThreadArrangementHost />
+                <ProjectChipIconRasterizer />
+              </NativeLayoutMetricsProvider>
+            </GlobalVoiceInputControl>
+            <OverlayPortalHost />
           </SafeAreaProvider>
         </KeyboardProvider>
       </GestureHandlerRootView>

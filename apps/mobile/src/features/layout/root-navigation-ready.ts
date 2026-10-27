@@ -1,6 +1,4 @@
-import { createNavigationContainerRef } from "@react-navigation/native";
-
-export const rootNavigationRef = createNavigationContainerRef();
+import { rootNavigationRef } from "../../lib/rootNavigation";
 
 // Root-layout effects run before the root navigator registers, so a navigation sent from one is dropped.
 const waiting = new Set<() => void>();
