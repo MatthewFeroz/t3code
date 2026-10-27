@@ -9,11 +9,14 @@ const AppIntents = requireOptionalNativeModule<{
   addListener(event: "onIntent", listener: () => void): { remove(): void };
 }>("T3AppIntents");
 
-/** Runs when the "New Task" App Shortcut fires from the Action button, Siri, or Spotlight. */
-export function useNewTaskAppIntent(onNewTask: () => void): void {
+export type NewTaskAppIntent = "newTask" | "voiceTask";
+
+/** Runs when a new-task App Shortcut fires from the Action button, Siri, or Spotlight. */
+export function useNewTaskAppIntent(onNewTask: (intent: NewTaskAppIntent) => void): void {
   const handlePendingIntent = useEffectEvent(() => {
-    if (AppIntents?.takePendingIntent() === "newTask") {
-      onNewTask();
+    const intent = AppIntents?.takePendingIntent();
+    if (intent === "newTask" || intent === "voiceTask") {
+      onNewTask(intent);
     }
   });
 

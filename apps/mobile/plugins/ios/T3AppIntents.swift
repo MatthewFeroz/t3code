@@ -14,6 +14,17 @@ struct StartNewTaskIntent: AppIntent {
   }
 }
 
+struct StartVoiceTaskIntent: AppIntent {
+  static let title: LocalizedStringResource = "New Voice Task"
+  static let openAppWhenRun = true
+
+  @MainActor
+  func perform() async throws -> some IntentResult {
+    T3AppIntentInbox.deliver(T3AppIntentInbox.voiceTask)
+    return .result()
+  }
+}
+
 struct T3AppShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
     AppShortcut(
@@ -24,6 +35,15 @@ struct T3AppShortcuts: AppShortcutsProvider {
       ],
       shortTitle: "New Task",
       systemImageName: "square.and.pencil"
+    )
+    AppShortcut(
+      intent: StartVoiceTaskIntent(),
+      phrases: [
+        "Dictate a new task in \(.applicationName)",
+        "New \(.applicationName) voice task",
+      ],
+      shortTitle: "New Voice Task",
+      systemImageName: "mic"
     )
   }
 }

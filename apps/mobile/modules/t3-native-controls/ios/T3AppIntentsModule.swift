@@ -4,6 +4,7 @@ import os
 /// Holds the last App Intent until JS takes it; cold launches run the intent before JS listens.
 public enum T3AppIntentInbox {
   public static let newTask = "newTask"
+  public static let voiceTask = "voiceTask"
 
   static let didDeliver = Notification.Name("T3AppIntentInbox.didDeliver")
   private static let pending = OSAllocatedUnfairLock<String?>(initialState: nil)
