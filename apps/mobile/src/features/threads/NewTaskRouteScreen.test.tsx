@@ -197,6 +197,9 @@ it("leaves navigation to a newer shortcut's picker when its no-project workspace
     ),
   );
   expect(state.selectDetail).not.toHaveBeenCalled();
+  state.focused = true;
+  await screen.render();
+  expect(screen.container.textContent).not.toContain("Opening new task");
 });
 
 it("waits for cold-launch connections before opening the no-project workspace", async () => {
