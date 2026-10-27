@@ -174,9 +174,8 @@ export function resolveInitialMainWindowBounds(
   }
   const display = primaryWorkArea;
   const defaults = DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
-  if (!display || (defaults.width <= display.width && defaults.height <= display.height)) {
-    return defaults;
-  }
+  // Electron centers an unpositioned macOS window on the full screen, which can put it under the Dock.
+  if (!display) return defaults;
   const width = Math.min(defaults.width, display.width);
   const height = Math.min(defaults.height, display.height);
   return {

@@ -908,6 +908,12 @@ describe("DesktopWindow", () => {
       expected: { x: -1190, y: 26, width: 1100, height: 694, minWidth: 360, minHeight: 320 },
     },
     {
+      scenario: "missing saved bounds and default size that just fits above the Dock",
+      workArea: { x: 0, y: 25, width: 1440, height: 800 },
+      savedBounds: null,
+      expected: { x: 170, y: 35, width: 1100, height: 780, minWidth: 360, minHeight: 320 },
+    },
+    {
       scenario: "offscreen saved bounds and a work area below the preferred minimum",
       workArea: { x: 40, y: 26, width: 280, height: 240 },
       savedBounds: { x: 2040, y: 80, width: 1320, height: 880 },
