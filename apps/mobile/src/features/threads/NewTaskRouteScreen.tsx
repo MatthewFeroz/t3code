@@ -274,8 +274,10 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       return;
     }
     // A second shortcut press stacks another picker; only the one on top may navigate.
+    // This one shows the project list if the user comes back to it.
     if (!navigation.isFocused()) {
       scratchStartInFlightRef.current = false;
+      setScratchStartFailed(true);
       return;
     }
     // selectProject handles its own failures, so this never throws.
