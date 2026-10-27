@@ -103,9 +103,7 @@ function PendingSecretRequestForm(props: {
       autoComplete="off"
       onPointerDown={(event) => {
         if (!(event.target instanceof HTMLElement)) return;
-        // Pressing text would move focus and cancel the selection, so the
-        // reason (often a URL to copy) stays selectable.
-        if (event.target.closest("input, button, a, p")) return;
+        if (event.target.closest("input, button, a")) return;
         document.getElementById(inputId)?.focus();
       }}
     >
