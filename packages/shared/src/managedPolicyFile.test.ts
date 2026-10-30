@@ -206,6 +206,18 @@ describe("readManagedPolicy", () => {
           },
         },
       });
+      assert.deepStrictEqual(
+        windowsPolicyDocument(
+          parseRegistryExport(
+            regExport(
+              Object.fromEntries(
+                Object.entries(sections).map(([key, values]) => [key.toLowerCase(), values]),
+              ),
+            ),
+          ),
+        ),
+        windowsPolicyDocument(parseRegistryExport(regExport(sections))),
+      );
 
       const organization = '"Organization"="Example Corp"';
       // Disabling a policy in Windows 11 leaves each checkbox's falseValue in the registry.

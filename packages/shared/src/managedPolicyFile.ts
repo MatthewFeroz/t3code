@@ -218,13 +218,16 @@ export function windowsPolicyDocument(
   for (const value of values) {
     const where = value.key === "" ? value.name : `${value.key}\\${value.name}`;
     if (value.key !== "") {
-      if (!Object.hasOwn(WINDOWS_POLICY_LISTS, value.key)) {
+      const listKey = Object.keys(WINDOWS_POLICY_LISTS).find(
+        (key) => key.toLowerCase() === value.key.toLowerCase(),
+      );
+      if (listKey === undefined) {
         return { error: `${value.key} is not a T3 Code policy key` };
       }
       const checked = dwordBoolean(value);
       if (checked === undefined) return { error: `${where} must be a DWORD of 0 or 1` };
-      const list = lists.get(value.key) ?? [];
-      lists.set(value.key, list);
+      const list = lists.get(listKey) ?? [];
+      lists.set(listKey, list);
       if (checked) list.push(value.name);
       continue;
     }
