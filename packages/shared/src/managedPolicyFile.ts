@@ -112,6 +112,11 @@ export const WINDOWS_POLICY_LISTS = {
   Clients: ["limits", "clients"],
   AllowedDrivers: ["limits", "providers", "allowedDrivers"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
+// A disabled policy still writes its checkboxes' falseValue; its own DWORD disambiguates it.
+export const WINDOWS_POLICY_GROUPS = {
+  ...WINDOWS_POLICY_LISTS,
+  Updates: ["limits", "updates"],
+} as const satisfies Record<string, ReadonlyArray<string>>;
 const WINDOWS_POLICIES_ROOT = "HKLM\\SOFTWARE\\Policies";
 // Absolute paths: an earlier PATH entry could otherwise answer that there is no policy.
 const PLUTIL = "/usr/bin/plutil";
@@ -194,6 +199,22 @@ export function windowsPolicyDocument(
 ): { readonly document: unknown } | { readonly error: string } {
   const document: Record<string, unknown> = { schemaVersion: 1 };
   const lists = new Map<string, Array<string>>();
+  const disabled: Array<ReadonlyArray<string>> = [];
+  for (const value of values) {
+    if (value.key !== "" || !Object.hasOwn(WINDOWS_POLICY_GROUPS, value.name)) continue;
+    const enabled = dwordBoolean(value);
+    if (enabled === undefined) return { error: `${value.name} must be a DWORD of 0 or 1` };
+    if (!enabled) {
+      disabled.push(WINDOWS_POLICY_GROUPS[value.name as keyof typeof WINDOWS_POLICY_GROUPS]);
+    } else if (Object.hasOwn(WINDOWS_POLICY_LISTS, value.name)) {
+      lists.set(value.name, []);
+    }
+  }
+  const put = (path: ReadonlyArray<string>, value: unknown) => {
+    if (!disabled.some((prefix) => prefix.every((segment, index) => path[index] === segment))) {
+      setPath(document, path, value);
+    }
+  };
   for (const value of values) {
     const where = value.key === "" ? value.name : `${value.key}\\${value.name}`;
     if (value.key !== "") {
@@ -207,6 +228,7 @@ export function windowsPolicyDocument(
       if (checked) list.push(value.name);
       continue;
     }
+    if (Object.hasOwn(WINDOWS_POLICY_GROUPS, value.name)) continue;
     if (!Object.hasOwn(WINDOWS_POLICY_VALUES, value.name)) {
       return { error: `${value.name} is not a T3 Code policy value` };
     }
@@ -214,22 +236,22 @@ export function windowsPolicyDocument(
     if (field.type === "boolean") {
       const flag = dwordBoolean(value);
       if (flag === undefined) return { error: `${where} must be a DWORD of 0 or 1` };
-      setPath(document, field.path, flag);
+      put(field.path, flag);
       continue;
     }
     if (value.type !== "REG_SZ") return { error: `${where} must be a string` };
     // Group Policy writes an empty string for a box left blank.
     if (value.data === "") continue;
     if (field.type === "string") {
-      setPath(document, field.path, value.data);
+      put(field.path, value.data);
       continue;
     }
     const parsed = decodeJsonExit(value.data);
     if (Exit.isFailure(parsed)) return { error: `${where} is not valid JSON` };
-    setPath(document, field.path, parsed.value);
+    put(field.path, parsed.value);
   }
   for (const [key, list] of lists) {
-    setPath(document, WINDOWS_POLICY_LISTS[key as keyof typeof WINDOWS_POLICY_LISTS], list);
+    put(WINDOWS_POLICY_LISTS[key as keyof typeof WINDOWS_POLICY_LISTS], list);
   }
   // The schema would name `["organization"]`, which an admin cannot map to a Group Policy setting.
   if (document.organization === undefined) {

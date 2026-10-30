@@ -185,6 +185,9 @@ describe("readManagedPolicy", () => {
           '"Settings"="{\\"enableAgentBrowserAccess\\": {\\"value\\": \\"a\\\\\\\\b\\", \\"locked\\": true}}"',
           '"UpdatesMode"="off"',
           '"AllowNightly"=dword:00000001',
+          '"Updates"=dword:00000001',
+          '"Clients"=dword:00000001',
+          '"AllowedDrivers"=dword:00000001',
         ],
         Clients: ['"desktop"=dword:00000001', '"remote"=dword:00000000'],
         AllowedDrivers: ['"codex"=dword:00000001', '"claudeAgent"=dword:00000001'],
@@ -204,13 +207,48 @@ describe("readManagedPolicy", () => {
         },
       });
 
-      // Anything the template does not write fails closed rather than being ignored.
       const organization = '"Organization"="Example Corp"';
+      // Disabling a policy in Windows 11 leaves each checkbox's falseValue in the registry.
+      assert.deepStrictEqual(
+        windowsPolicyDocument(
+          parseRegistryExport(
+            regExport({
+              "": [
+                organization,
+                '"Clients"=dword:00000000',
+                '"AllowedDrivers"=dword:00000000',
+                '"Updates"=dword:00000000',
+                '"AllowNightly"=dword:00000000',
+                '"Telemetry"=dword:00000000',
+              ],
+              Clients: [
+                '"desktop"=dword:00000000',
+                '"local-browser"=dword:00000000',
+                '"remote"=dword:00000000',
+              ],
+              AllowedDrivers: ['"codex"=dword:00000000', '"claudeAgent"=dword:00000000'],
+            }),
+          ),
+        ),
+        {
+          document: {
+            schemaVersion: 1,
+            organization: "Example Corp",
+            limits: { telemetry: false },
+          },
+        },
+      );
+      // Anything the template does not write fails closed rather than being ignored.
       for (const [values, reason] of [
         [{ "": [organization, '"Telemetry"=dword:00000002'] }, "DWORD of 0 or 1"],
         [{ "": [organization, '"MaxMode"="auto"'] }, "not a T3 Code policy value"],
         [{ "": [organization], Other: ['"x"=dword:00000001'] }, "not a T3 Code policy key"],
         [{ "": [organization, '"Settings"="{"'] }, "not valid JSON"],
+        [{ "": [organization, '"Clients"=dword:00000002'] }, "DWORD of 0 or 1"],
+        [
+          { "": [organization, '"Clients"=dword:00000001'], Clients: ['"desktop"=dword:00000000'] },
+          "does not match the policy schema",
+        ],
         [
           { "": [organization], Clients: ['"remote"=dword:00000000'] },
           "does not match the policy schema",

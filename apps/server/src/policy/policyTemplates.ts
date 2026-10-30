@@ -1,6 +1,7 @@
 import type { ManagedPolicyDocument } from "@t3tools/contracts";
 import {
   WINDOWS_POLICY_KEY,
+  WINDOWS_POLICY_GROUPS,
   WINDOWS_POLICY_LISTS,
   WINDOWS_POLICY_VALUES,
 } from "@t3tools/shared/managedPolicyFile";
@@ -225,8 +226,9 @@ export function windowsAdmx(): string {
       <disabledValue><decimal value="0" /></disabledValue>
     </policy>`;
     }
-    return `    ${head} presentation="$(presentation.${policy.id})">
-      ${common}
+    const grouped = Object.hasOwn(WINDOWS_POLICY_GROUPS, policy.id);
+    return `    ${head}${grouped ? ` valueName="${policy.id}"` : ""} presentation="$(presentation.${policy.id})">
+      ${common}${grouped ? '\n      <enabledValue><decimal value="1" /></enabledValue>\n      <disabledValue><decimal value="0" /></disabledValue>' : ""}
       <elements>
         ${(policy.elements ?? []).map(admxElement).join("\n        ")}
       </elements>
