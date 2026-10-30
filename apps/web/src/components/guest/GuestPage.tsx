@@ -282,8 +282,13 @@ function GuestSession({ shareId }: { readonly shareId: string }) {
     if (historyCursor === null || loadingHistory) return;
     setHistoryLoad({ cursor: historyCursor, error: null });
     const result = await fetchGuestHistoryPage(shareId, historyCursor);
-    if (typeof result === "string") setHistoryLoad({ cursor: historyCursor, error: result });
-    else dispatch({ type: "history-page", cursor: historyCursor, page: result });
+    if (typeof result === "string") {
+      setHistoryLoad({ cursor: historyCursor, error: result });
+      return;
+    }
+    dispatch({ type: "history-page", cursor: historyCursor, page: result });
+    // A reconnect snapshot can bring this cursor back, so a finished load must not look running.
+    setHistoryLoad(null);
   };
   const historyControls: MessagesTimelineHistoryControls | undefined =
     historyCursor === null

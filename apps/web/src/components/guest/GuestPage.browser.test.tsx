@@ -1,11 +1,13 @@
 import {
   EventId,
   GUEST_COMMAND_OUTPUT_ROUTE,
+  GUEST_HISTORY_ROUTE,
   GUEST_RENDER_ROUTE,
   GuestMessageId,
   GuestShareId,
   GuestStreamEvent,
   MessageId,
+  OrchestrationV2ThreadHistoryPage,
   ProviderDriverKind,
   RunId,
   TurnItemId,
@@ -26,6 +28,7 @@ import { GuestPage } from "./GuestPage";
 
 const SHARE_ID = "share-1";
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(Schema.toCodecJson(GuestStreamEvent)));
+const encodeHistoryPage = Schema.encodeSync(Schema.toCodecJson(OrchestrationV2ThreadHistoryPage));
 
 const fixture = makeThreadProjectionFixture();
 const threadId = fixture.thread.id;
@@ -119,6 +122,7 @@ const view: GuestShareView = {
 const opening = (
   runs: ReadonlyArray<OrchestrationV2Run>,
   turnItems: ReadonlyArray<OrchestrationV2TurnItem>,
+  historyCursor?: string,
 ): ReadonlyArray<GuestStreamEvent> => [
   { type: "view", view },
   {
@@ -126,6 +130,7 @@ const opening = (
     item: {
       kind: "snapshot",
       snapshotSequence: 1,
+      ...(historyCursor === undefined ? {} : { historyCursor, hasMoreHistory: true }),
       projection: {
         ...fixture,
         runs,
@@ -247,6 +252,64 @@ describe("GuestPage", () => {
     expect(socket).not.toHaveBeenCalled();
     // The composer names the thread's model, as the owner's does, with nothing to pick.
     await expect.element(screen.getByLabelText("Model: GPT-5.4")).toBeVisible();
+  });
+
+  it("can load earlier turns again after a reconnect resends the same cursor", async () => {
+    using _page = visit(`/guest?share=${SHARE_ID}`);
+    const earlier = {
+      ...itemBase("earlier", 1),
+      type: "user_message",
+      createdBy: "user",
+      creationSource: "web",
+      messageId: MessageId.make("earlier"),
+      inputIntent: "turn_start",
+      text: "Earlier question",
+      attachments: [],
+    } satisfies OrchestrationV2TurnItem;
+    const page = encodeHistoryPage({
+      snapshotSequence: 1,
+      items: [
+        {
+          position: 0,
+          visibility: "local",
+          sourceThreadId: threadId,
+          sourceItemId: earlier.id,
+          item: earlier,
+        },
+      ],
+      nextCursor: null,
+      hasMoreHistory: false,
+    });
+    using fetchSpy = vi
+      .spyOn(window, "fetch")
+      .mockImplementation(async (url) =>
+        String(url).startsWith(GUEST_HISTORY_ROUTE)
+          ? Response.json(page)
+          : new Response(null, { status: 204 }),
+      );
+    const historyRequests = () =>
+      fetchSpy.mock.calls.filter(([url]) => String(url).startsWith(GUEST_HISTORY_ROUTE)).length;
+    const sources: Array<EventTarget> = [];
+    const windowed = opening(
+      [run("run-1", 1, "completed")],
+      [reply("latest", 10, "Latest reply")],
+      "cursor-1",
+    );
+    using _stream = vi
+      .spyOn(window, "EventSource")
+      .mockImplementation(fakeEventSource(windowed, sources) as never);
+    await using screen = await render(<GuestPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Load earlier turns" }));
+    await expect.element(screen.getByText("Earlier question")).toBeVisible();
+    // The unchanged thread reopens with the cursor the guest already loaded.
+    for (const event of windowed) {
+      sources.at(-1)!.dispatchEvent(new MessageEvent("message", { data: encodeEvent(event) }));
+    }
+    const loadEarlier = screen.getByRole("button", { name: "Load earlier turns" });
+    await expect.element(loadEarlier).toBeEnabled();
+    await userEvent.click(loadEarlier);
+    await vi.waitFor(() => expect(historyRequests()).toBe(2));
   });
 
   it("sends attached files with the message, as form data", async () => {
