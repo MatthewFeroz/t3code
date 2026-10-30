@@ -101,9 +101,9 @@ them in a policy file and run `t3 policy check` on it.
 
 T3 Code reads Group Policy through Windows PowerShell at
 `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` each time it starts, on every Windows
-machine, whether or not a policy is set. If AppLocker, WDAC, or another control stops T3 Code from
-running it, T3 Code refuses to start with "the registry cannot be read". Allow it for the users
-who run T3 Code.
+machine, whether or not a policy is set. Constrained Language mode, which AppLocker and WDAC
+script rules turn on, is fine. If a rule blocks `powershell.exe` itself for the users who run
+T3 Code, T3 Code refuses to start with "the registry cannot be read", so allow it for them.
 
 ## Change or remove a policy
 

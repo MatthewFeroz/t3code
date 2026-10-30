@@ -120,48 +120,33 @@ export const WINDOWS_POLICY_GROUPS = {
 const PLUTIL = "/usr/bin/plutil";
 const POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
-// Read HKLM directly into the pipe: a file in the user's TEMP can be replaced before we read it.
+// Pipe HKLM straight out, since a file in the user's TEMP can be swapped. Cmdlets only: AppLocker
+// and WDAC force Constrained Language mode, which blocks RegistryKey and [Console]. Non-ASCII goes
+// out as JSON escapes, whatever the code page. The provider expands REG_EXPAND_SZ, which the
+// template never writes.
 const WINDOWS_POLICY_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $PSModuleAutoLoadingPreference = 'None'
-function Read-PolicyKey($key, $path) {
-  foreach ($name in $key.GetValueNames()) {
-    $type = 'other'
-    $data = ''
-    $kind = $key.GetValueKind($name)
-    if ($kind -eq [Microsoft.Win32.RegistryValueKind]::String -or $kind -eq [Microsoft.Win32.RegistryValueKind]::DWord) {
-      $value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-      if ($null -eq $value) { throw 'Registry value disappeared' }
-      if ($kind -eq [Microsoft.Win32.RegistryValueKind]::String) {
-        $type = 'REG_SZ'
-        $data = $value
-      } else {
-        $type = 'REG_DWORD'
-        $data = '0x{0:x}' -f $value
+try {
+  Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Management\Microsoft.PowerShell.Management.psd1')
+  Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')
+  $root = $null
+  try { $root = Get-Item -LiteralPath '${WINDOWS_POLICY_KEY.replace(/^HKLM\\/, "HKLM:\\")}' } catch {
+    if ($_.FullyQualifiedErrorId -notlike 'PathNotFound,*') { throw }
+  }
+  $values = @(if ($null -ne $root) {
+    foreach ($key in @($root) + @(Get-ChildItem -LiteralPath $root.PSPath -Recurse)) {
+      $path = $key.Name.Substring($root.Name.Length).TrimStart('\')
+      foreach ($name in $key.Property) {
+        $data = Get-ItemPropertyValue -LiteralPath $key.PSPath -Name $name
+        if ($data -is [string]) { @{ key = $path; name = $name; type = 'REG_SZ'; data = $data } }
+        elseif ($data -is [int]) { @{ key = $path; name = $name; type = 'REG_DWORD'; data = '0x{0:x}' -f $data } }
+        else { @{ key = $path; name = $name; type = 'other'; data = '' } }
       }
     }
-    @{ key = $path; name = $name; type = $type; data = $data }
-  }
-  foreach ($name in $key.GetSubKeyNames()) {
-    $child = $key.OpenSubKey($name)
-    if ($null -eq $child) { throw 'Registry key disappeared' }
-    try {
-      $childPath = if ($path -eq '') { $name } else { "$path\$name" }
-      Read-PolicyKey $child $childPath
-    } finally { $child.Dispose() }
-  }
-}
-try {
-  Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')
-  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-  $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
-  try {
-    $key = $hive.OpenSubKey('${WINDOWS_POLICY_KEY.replace(/^HKLM\\/, "")}')
-    try {
-      $values = @(if ($null -ne $key) { Read-PolicyKey $key '' })
-      [Console]::Write((ConvertTo-Json -InputObject $values -Depth 4 -Compress))
-    } finally { if ($null -ne $key) { $key.Dispose() } }
-  } finally { $hive.Dispose() }
+  })
+  $json = ConvertTo-Json -InputObject $values -Depth 4 -Compress
+  -join @(foreach ($char in $json.ToCharArray()) { if ([int]$char -gt 127) { '\u{0:x4}' -f [int]$char } else { $char } })
 } catch { exit 1 }
 `;
 
