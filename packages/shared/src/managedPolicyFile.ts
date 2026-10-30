@@ -302,9 +302,15 @@ const readPlatformPolicy = Effect.fnUntraced(function* (platform: NodeJS.Platfor
             new ManagedPolicyFileError({ path, reason: "the registry cannot be read", cause }),
         ),
       );
-    // reg exits 1 both for a missing value and for a failed query. The Policies key exists on
-    // every Windows install, so reading it first separates the two.
+    // reg exits 1 both for a missing key and for a failure. The Policies key exists on every
+    // Windows install, so reading it first separates the two; once the policy key is known to
+    // exist, an export that fails for any reason must not read as no policy.
     if ((yield* query([WINDOWS_POLICIES_ROOT])).exitCode !== 0) {
+      return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
+    }
+    const exists = (yield* query([path])).exitCode;
+    if (exists === 1) return undefined;
+    if (exists !== 0) {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
     const exported = yield* Effect.gen(function* () {
@@ -319,7 +325,6 @@ const readPlatformPolicy = Effect.fnUntraced(function* (platform: NodeJS.Platfor
           new ManagedPolicyFileError({ path, reason: "the registry cannot be read", cause }),
       ),
     );
-    if (exported === 1) return undefined;
     if (typeof exported === "number") {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }

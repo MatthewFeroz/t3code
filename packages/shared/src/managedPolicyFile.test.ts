@@ -34,11 +34,11 @@ const regExport = (sections: Readonly<Record<string, ReadonlyArray<string>>>) =>
     "",
   ].join("\r\n");
 
-/** reg.exe whose export exits `exitCode`, and whose Policies root query exits `rootExitCode`. */
-const reg = (exitCode = 0, rootExitCode = 0) => ({
+/** reg.exe whose export, policy key query, and Policies root query exit with these codes. */
+const reg = ({ exported = 0, key = 0, root = 0 } = {}) => ({
   "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) => ({
     stdout: "",
-    exitCode: args[0] === "export" ? exitCode : rootExitCode,
+    exitCode: args[0] === "export" ? exported : args[1]?.endsWith("\\T3Code") ? key : root,
   }),
 });
 
@@ -153,11 +153,15 @@ describe("readManagedPolicy", () => {
       const exported = { [EXPORT_FILE]: regExport({ "": ['"Organization"="Example Corp"'] }) };
 
       assert.equal(yield* read("win32", exported, reg()), WINDOWS_POLICY_KEY);
-      assert.isUndefined(yield* read("win32", {}, reg(1)));
-      // An export that fails exits 1 too, so it must not read as no policy.
-      assert.include(yield* read("win32", {}, reg(1, 1)), "registry cannot be read");
+      assert.isUndefined(yield* read("win32", {}, reg({ key: 1 })));
+      // reg exits 1 for failures too, so neither of these may read as no policy.
+      assert.include(yield* read("win32", {}, reg({ key: 1, root: 1 })), "registry cannot be read");
+      assert.include(
+        yield* read("win32", exported, reg({ exported: 1 })),
+        "registry cannot be read",
+      );
       assert.equal(
-        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg(1)),
+        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg({ key: 1 })),
         managedPolicyPath("win32"),
       );
       assert.include(
