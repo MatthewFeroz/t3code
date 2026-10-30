@@ -86,7 +86,6 @@ export const MACOS_MANAGED_PREFERENCES_PATH =
   "/Library/Managed Preferences/com.t3tools.t3code.plist";
 /** The registry key the Group Policy template's controls write to, one value each. */
 export const WINDOWS_POLICY_KEY = "HKLM\\SOFTWARE\\Policies\\T3Tools\\T3Code";
-const WINDOWS_POLICY_KEY_SUFFIX = "\\software\\policies\\t3tools\\t3code";
 
 /** Each value a Group Policy control writes, and where it lands in the document. */
 export const WINDOWS_POLICY_VALUES = {
@@ -117,10 +116,54 @@ export const WINDOWS_POLICY_GROUPS = {
   ...WINDOWS_POLICY_LISTS,
   Updates: ["limits", "updates"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
-const WINDOWS_POLICIES_ROOT = "HKLM\\SOFTWARE\\Policies";
 // Absolute paths: an earlier PATH entry could otherwise answer that there is no policy.
 const PLUTIL = "/usr/bin/plutil";
-const REG = "C:\\Windows\\System32\\reg.exe";
+const POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+// Read HKLM directly into the pipe: a file in the user's TEMP can be replaced before we read it.
+const WINDOWS_POLICY_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+$PSModuleAutoLoadingPreference = 'None'
+function Read-PolicyKey($key, $path) {
+  foreach ($name in $key.GetValueNames()) {
+    $type = 'other'
+    $data = ''
+    $kind = $key.GetValueKind($name)
+    if ($kind -eq [Microsoft.Win32.RegistryValueKind]::String -or $kind -eq [Microsoft.Win32.RegistryValueKind]::DWord) {
+      $value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      if ($null -eq $value) { throw 'Registry value disappeared' }
+      if ($kind -eq [Microsoft.Win32.RegistryValueKind]::String) {
+        $type = 'REG_SZ'
+        $data = $value
+      } else {
+        $type = 'REG_DWORD'
+        $data = '0x{0:x}' -f $value
+      }
+    }
+    @{ key = $path; name = $name; type = $type; data = $data }
+  }
+  foreach ($name in $key.GetSubKeyNames()) {
+    $child = $key.OpenSubKey($name)
+    if ($null -eq $child) { throw 'Registry key disappeared' }
+    try {
+      $childPath = if ($path -eq '') { $name } else { "$path\$name" }
+      Read-PolicyKey $child $childPath
+    } finally { $child.Dispose() }
+  }
+}
+try {
+  Import-Module ($PSHOME + '\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')
+  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+  $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+  try {
+    $key = $hive.OpenSubKey('${WINDOWS_POLICY_KEY.replace(/^HKLM\\/, "")}')
+    try {
+      $values = @(if ($null -ne $key) { Read-PolicyKey $key '' })
+      [Console]::Write((ConvertTo-Json -InputObject $values -Depth 4 -Compress))
+    } finally { if ($null -ne $key) { $key.Dispose() } }
+  } finally { $hive.Dispose() }
+} catch { exit 1 }
+`;
 
 const run = Effect.fnUntraced(function* (command: string, args: ReadonlyArray<string>) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -136,51 +179,17 @@ const run = Effect.fnUntraced(function* (command: string, args: ReadonlyArray<st
 
 const decodeJsonExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
-interface RegistryValue {
-  /** The subkey below the policy key, or "" for the key itself. */
-  readonly key: string;
-  readonly name: string;
-  readonly type: "REG_SZ" | "REG_DWORD" | "other";
-  readonly data: string;
-}
-
-const unescapeRegString = (text: string) => text.replace(/\\(.)/g, "$1");
-
-/**
- * The values in `reg export <policy key>` output. `reg query` writes in the console code page,
- * which garbles or drops text outside it; the export file is UTF-16 and loses nothing.
- */
-export function parseRegistryExport(output: string): ReadonlyArray<RegistryValue> {
-  const values: Array<RegistryValue> = [];
-  let key = "";
-  for (const line of output.split(/\r?\n/)) {
-    const header = /^\[(.*)\]$/.exec(line);
-    if (header !== null) {
-      const at = header[1]!.toLowerCase().indexOf(WINDOWS_POLICY_KEY_SUFFIX);
-      key = at === -1 ? header[1]! : header[1]!.slice(at + WINDOWS_POLICY_KEY_SUFFIX.length + 1);
-      continue;
-    }
-    const match = /^(?:"((?:[^"\\]|\\.)*)"|(@))=(.*)$/.exec(line);
-    if (match === null) continue;
-    const name = match[2] === undefined ? unescapeRegString(match[1]!) : "(Default)";
-    const raw = match[3]!;
-    const text = /^"((?:[^"\\]|\\.)*)"$/.exec(raw);
-    const dword = /^dword:([0-9a-f]{8})$/i.exec(raw);
-    values.push(
-      text !== null
-        ? { key, name, type: "REG_SZ", data: unescapeRegString(text[1]!) }
-        : dword !== null
-          ? {
-              key,
-              name,
-              type: "REG_DWORD",
-              data: `0x${Number.parseInt(dword[1]!, 16).toString(16)}`,
-            }
-          : { key, name, type: "other", data: raw },
-    );
-  }
-  return values;
-}
+const RegistryValue = Schema.Struct({
+  key: Schema.String,
+  name: Schema.String,
+  type: Schema.Literals(["REG_SZ", "REG_DWORD", "other"]),
+  data: Schema.String,
+});
+type RegistryValue = typeof RegistryValue.Type;
+const decodeRegistryValues = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(RegistryValue)),
+  { onExcessProperty: "error" },
+);
 
 const setPath = (target: Record<string, unknown>, path: ReadonlyArray<string>, value: unknown) => {
   let node = target;
@@ -322,40 +331,32 @@ const readPlatformPolicy = Effect.fnUntraced(function* (platform: NodeJS.Platfor
   }
   if (platform === "win32") {
     const path = WINDOWS_POLICY_KEY;
-    const query = (args: ReadonlyArray<string>) =>
-      run(REG, ["query", ...args, "/reg:64"]).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ManagedPolicyFileError({ path, reason: "the registry cannot be read", cause }),
-        ),
-      );
-    // reg exits 1 both for a missing key and for a failure. The Policies key exists on every
-    // Windows install, so reading it first separates the two; once the policy key is known to
-    // exist, an export that fails for any reason must not read as no policy.
-    if ((yield* query([WINDOWS_POLICIES_ROOT])).exitCode !== 0) {
-      return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
-    }
-    const exists = (yield* query([path])).exitCode;
-    if (exists === 1) return undefined;
-    if (exists !== 0) {
-      return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
-    }
-    const exported = yield* Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const file = `${yield* fs.makeTempDirectoryScoped({ prefix: "t3code-policy-" })}\\policy.reg`;
-      const { exitCode } = yield* run(REG, ["export", path, file, "/y", "/reg:64"]);
-      return exitCode === 0 ? yield* fs.readFileString(file, "utf-16le") : exitCode;
-    }).pipe(
-      Effect.scoped,
+    const { stdout, exitCode } = yield* run(POWERSHELL, [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      WINDOWS_POLICY_SCRIPT,
+    ]).pipe(
       Effect.mapError(
         (cause) =>
           new ManagedPolicyFileError({ path, reason: "the registry cannot be read", cause }),
       ),
     );
-    if (typeof exported === "number") {
+    if (exitCode !== 0) {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
-    const built = windowsPolicyDocument(parseRegistryExport(exported));
+    const values = yield* decodeRegistryValues(stdout).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ManagedPolicyFileError({
+            path,
+            reason: "the registry reader returned invalid data",
+            cause,
+          }),
+      ),
+    );
+    const built = windowsPolicyDocument(values);
     if ("error" in built) {
       return yield* new ManagedPolicyFileError({ path, reason: built.error });
     }

@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import { ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -9,7 +10,6 @@ import { ChildProcessSpawner } from "effect/process";
 import {
   MACOS_MANAGED_PREFERENCES_PATH,
   managedPolicyPath,
-  parseRegistryExport,
   readManagedPolicy,
   WINDOWS_POLICY_KEY,
   windowsPolicyDocument,
@@ -21,25 +21,17 @@ type Result = { readonly stdout: string; readonly exitCode: number };
 
 const TEMP = "C:\\Temp\\t3code-policy";
 const EXPORT_FILE = `${TEMP}\\policy.reg`;
+const POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
-/** What `reg export` writes for the policy key, given each subkey's value lines. */
-const regExport = (sections: Readonly<Record<string, ReadonlyArray<string>>>) =>
-  [
-    "Windows Registry Editor Version 5.00",
-    ...Object.entries(sections).flatMap(([key, lines]) => [
-      "",
-      `[HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\T3Tools\\T3Code${key === "" ? "" : `\\${key}`}]`,
-      ...lines,
-    ]),
-    "",
-  ].join("\r\n");
+const registryValue = (name: string, data: string | number, key = "") => ({
+  key,
+  name,
+  type: typeof data === "number" ? ("REG_DWORD" as const) : ("REG_SZ" as const),
+  data: typeof data === "number" ? `0x${data.toString(16)}` : data,
+});
 
-/** reg.exe whose export, policy key query, and Policies root query exit with these codes. */
-const reg = ({ exported = 0, key = 0, root = 0 } = {}) => ({
-  "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) => ({
-    stdout: "",
-    exitCode: args[0] === "export" ? exported : args[1]?.endsWith("\\T3Code") ? key : root,
-  }),
+const registry = (values: Parameters<typeof windowsPolicyDocument>[0], exitCode = 0) => ({
+  [POWERSHELL]: { stdout: JSON.stringify(values), exitCode },
 });
 
 /** Files that exist, and what a command prints and exits with, by command name and arguments. */
@@ -148,43 +140,56 @@ describe("readManagedPolicy", () => {
     }),
   );
 
-  it.effect("treats missing, empty or disabled Windows policies as none", () =>
+  it.effect("reads Windows policy without trusting temporary files", () =>
     Effect.gen(function* () {
-      const exported = { [EXPORT_FILE]: regExport({ "": ['"Organization"="Example Corp"'] }) };
-
-      assert.equal(yield* read("win32", exported, reg()), WINDOWS_POLICY_KEY);
-      assert.isUndefined(yield* read("win32", {}, reg({ key: 1 })));
-      // reg exits 1 for failures too, so neither of these may read as no policy.
-      assert.include(yield* read("win32", {}, reg({ key: 1, root: 1 })), "registry cannot be read");
-      assert.include(
-        yield* read("win32", exported, reg({ exported: 1 })),
-        "registry cannot be read",
+      const values = [registryValue("Organization", "Example Corp"), registryValue("Telemetry", 0)];
+      const forgedExport = {
+        [EXPORT_FILE]:
+          "Windows Registry Editor Version 5.00\r\n\r\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\T3Tools\\T3Code]\r\n",
+      };
+      const found = yield* readManagedPolicy("win32").pipe(
+        Effect.provide(
+          machine(forgedExport, {
+            ...registry(values),
+            "C:\\Windows\\System32\\reg.exe": { stdout: "", exitCode: 0 },
+          }),
+        ),
       );
-      assert.equal(
-        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg({ key: 1 })),
-        managedPolicyPath("win32"),
-      );
+      assert.deepStrictEqual(found, {
+        source: WINDOWS_POLICY_KEY,
+        document: { schemaVersion: 1, organization: "Example Corp", limits: { telemetry: false } },
+      });
+      for (const exitCode of [1, 5]) {
+        assert.include(yield* read("win32", {}, registry([], exitCode)), "registry cannot be read");
+      }
+      for (const stdout of ["", "{", "{}", "null", '[{"key":""}]']) {
+        assert.include(
+          yield* read("win32", {}, { [POWERSHELL]: { stdout, exitCode: 0 } }),
+          "registry reader returned invalid data",
+        );
+      }
       assert.include(
-        yield* read("win32", { ...exported, [managedPolicyPath("win32")]: policy }, reg()),
+        yield* read("win32", { [managedPolicyPath("win32")]: policy }, registry(values)),
         "deploy the policy one way",
       );
-      // Disabled groups leave their DWORD and unchecked boxes behind, without Organization.
-      for (const sections of [
-        { "": [] },
-        {
-          "": ['"AllowedDrivers"=dword:00000000'],
-          AllowedDrivers: ['"codex"=dword:00000000', '"claudeAgent"=dword:00000000'],
-        },
-        {
-          "": ['"Clients"=dword:00000000'],
-          Clients: ['"desktop"=dword:00000000', '"remote"=dword:00000000'],
-        },
-        { "": ['"Updates"=dword:00000000', '"AllowNightly"=dword:00000000'] },
-      ] as const) {
-        const files = { [EXPORT_FILE]: regExport(sections) };
-        assert.isUndefined(yield* read("win32", files, reg()));
+      // Missing keys and disabled groups both leave no effective policy.
+      for (const values of [
+        [],
+        [
+          registryValue("AllowedDrivers", 0),
+          registryValue("codex", 0, "AllowedDrivers"),
+          registryValue("claudeAgent", 0, "AllowedDrivers"),
+        ],
+        [
+          registryValue("Clients", 0),
+          registryValue("desktop", 0, "Clients"),
+          registryValue("remote", 0, "Clients"),
+        ],
+        [registryValue("Updates", 0), registryValue("AllowNightly", 0)],
+      ]) {
+        assert.isUndefined(yield* read("win32", {}, registry(values)));
         assert.equal(
-          yield* read("win32", { ...files, [managedPolicyPath("win32")]: policy }, reg()),
+          yield* read("win32", { [managedPolicyPath("win32")]: policy }, registry(values)),
           managedPolicyPath("win32"),
         );
       }
@@ -193,73 +198,68 @@ describe("readManagedPolicy", () => {
 
   it.effect("builds the policy from the values the Group Policy template writes", () =>
     Effect.gen(function* () {
-      // As a Windows 10 PC exports them: text outside the console code page, and escaped quotes.
-      const sections = {
-        "": [
-          '"Organization"="Société 日本 ✓"',
-          '"SupportUrl"=""',
-          '"MaxRuntimeMode"="auto-accept-edits"',
-          '"Telemetry"=dword:00000000',
-          '"Settings"="{\\"enableAgentBrowserAccess\\": {\\"value\\": \\"a\\\\\\\\b\\", \\"locked\\": true}}"',
-          '"UpdatesMode"="off"',
-          '"AllowNightly"=dword:00000001',
-          '"Updates"=dword:00000001',
-          '"Clients"=dword:00000001',
-          '"AllowedDrivers"=dword:00000001',
-        ],
-        Clients: ['"desktop"=dword:00000001', '"remote"=dword:00000000'],
-        AllowedDrivers: ['"codex"=dword:00000001', '"claudeAgent"=dword:00000001'],
-      };
-      assert.deepStrictEqual(windowsPolicyDocument(parseRegistryExport(regExport(sections))), {
-        document: {
-          schemaVersion: 1,
-          organization: "Société 日本 ✓",
-          settings: { enableAgentBrowserAccess: { value: "a\\b", locked: true } },
-          limits: {
-            maxRuntimeMode: "auto-accept-edits",
-            telemetry: false,
-            updates: { mode: "off", allowNightly: true },
-            clients: ["desktop"],
-            providers: { allowedDrivers: ["codex", "claudeAgent"] },
+      const values = [
+        registryValue("Organization", "Société 日本 ✓"),
+        registryValue("SupportUrl", ""),
+        registryValue("MaxRuntimeMode", "auto-accept-edits"),
+        registryValue("Telemetry", 0),
+        registryValue(
+          "Settings",
+          JSON.stringify({ gateway: { value: 'a\\b "日本"\n ', locked: true } }),
+        ),
+        registryValue("UpdatesMode", "off"),
+        registryValue("AllowNightly", 1),
+        registryValue("Updates", 1),
+        registryValue("Clients", 1),
+        registryValue("AllowedDrivers", 1),
+        registryValue("desktop", 1, "Clients"),
+        registryValue("remote", 0, "Clients"),
+        registryValue("codex", 1, "AllowedDrivers"),
+        registryValue("claudeAgent", 1, "AllowedDrivers"),
+      ];
+      const document = {
+        schemaVersion: 1,
+        organization: "Société 日本 ✓",
+        settings: { gateway: { value: 'a\\b "日本"\n ', locked: true } },
+        limits: {
+          maxRuntimeMode: "auto-accept-edits",
+          telemetry: false,
+          updates: { mode: "off", allowNightly: true },
+          clients: ["desktop"],
+          providers: {
+            allowedDrivers: [
+              ProviderDriverKind.make("codex"),
+              ProviderDriverKind.make("claudeAgent"),
+            ],
           },
         },
-      });
+      } as const;
       assert.deepStrictEqual(
-        windowsPolicyDocument(
-          parseRegistryExport(
-            regExport(
-              Object.fromEntries(
-                Object.entries(sections).map(([key, values]) => [key.toLowerCase(), values]),
-              ),
-            ),
-          ),
-        ),
-        windowsPolicyDocument(parseRegistryExport(regExport(sections))),
+        (yield* readManagedPolicy("win32").pipe(Effect.provide(machine({}, registry(values)))))
+          ?.document,
+        document,
+      );
+      assert.deepStrictEqual(
+        windowsPolicyDocument(values.map((value) => ({ ...value, key: value.key.toLowerCase() }))),
+        { document },
       );
 
-      const organization = '"Organization"="Example Corp"';
+      const organization = registryValue("Organization", "Example Corp");
       // Disabling a policy in Windows 11 leaves each checkbox's falseValue in the registry.
       assert.deepStrictEqual(
-        windowsPolicyDocument(
-          parseRegistryExport(
-            regExport({
-              "": [
-                organization,
-                '"Clients"=dword:00000000',
-                '"AllowedDrivers"=dword:00000000',
-                '"Updates"=dword:00000000',
-                '"AllowNightly"=dword:00000000',
-                '"Telemetry"=dword:00000000',
-              ],
-              Clients: [
-                '"desktop"=dword:00000000',
-                '"local-browser"=dword:00000000',
-                '"remote"=dword:00000000',
-              ],
-              AllowedDrivers: ['"codex"=dword:00000000', '"claudeAgent"=dword:00000000'],
-            }),
-          ),
-        ),
+        windowsPolicyDocument([
+          organization,
+          registryValue("Clients", 0),
+          registryValue("AllowedDrivers", 0),
+          registryValue("Updates", 0),
+          registryValue("AllowNightly", 0),
+          registryValue("Telemetry", 0),
+          registryValue("desktop", 0, "Clients"),
+          registryValue("local-browser", 0, "Clients"),
+          registryValue("remote", 0, "Clients"),
+          registryValue("codex", 0, "AllowedDrivers"),
+          registryValue("claudeAgent", 0, "AllowedDrivers"),
+        ]),
         {
           document: {
             schemaVersion: 1,
@@ -270,36 +270,33 @@ describe("readManagedPolicy", () => {
       );
       // Anything the template does not write fails closed rather than being ignored.
       for (const [values, reason] of [
-        [{ "": [organization, '"Telemetry"=dword:00000002'] }, "DWORD of 0 or 1"],
-        [{ "": [organization, '"MaxMode"="auto"'] }, "not a T3 Code policy value"],
-        [{ "": [organization], Other: ['"x"=dword:00000001'] }, "not a T3 Code policy key"],
-        [{ "": [organization, '"Settings"="{"'] }, "not valid JSON"],
-        [{ "": [organization, '"Clients"=dword:00000002'] }, "DWORD of 0 or 1"],
+        [[organization, registryValue("Telemetry", 2)], "DWORD of 0 or 1"],
+        [[organization, registryValue("MaxMode", "auto")], "not a T3 Code policy value"],
+        [[organization, registryValue("x", 1, "Other")], "not a T3 Code policy key"],
+        [[organization, registryValue("Settings", "{")], "not valid JSON"],
+        [[organization, registryValue("Clients", 2)], "DWORD of 0 or 1"],
         [
-          { "": [organization, '"Clients"=dword:00000001'], Clients: ['"desktop"=dword:00000000'] },
+          [organization, registryValue("Clients", 1), registryValue("desktop", 0, "Clients")],
           "does not match the policy schema",
         ],
+        [[organization, registryValue("remote", 0, "Clients")], "does not match the policy schema"],
+        [[registryValue("Organization", 1)], "Organization must be a string"],
+        [[{ ...organization, type: "other" }], "Organization must be a string"],
         [
-          { "": [organization], Clients: ['"remote"=dword:00000000'] },
-          "does not match the policy schema",
-        ],
-        [{ "": ['"Organization"=dword:00000001'] }, "Organization must be a string"],
-        [{ "": ['"Organization"=hex(2):45,00,00,00'] }, "Organization must be a string"],
-        [
-          { "": ['"MaxRuntimeMode"="auto-accept-edits"'] },
+          [registryValue("MaxRuntimeMode", "auto-accept-edits")],
           "set the Organization policy whenever another T3 Code policy is set",
         ],
         [
-          { "": ['"AllowedDrivers"=dword:00000000', '"Telemetry"=dword:00000000'] },
+          [registryValue("AllowedDrivers", 0), registryValue("Telemetry", 0)],
           "set the Organization policy whenever another T3 Code policy is set",
         ],
         [
-          { "": ['"AllowedDrivers"=dword:00000000', '"MaxMode"="auto"'] },
+          [registryValue("AllowedDrivers", 0), registryValue("MaxMode", "auto")],
           "not a T3 Code policy value",
         ],
-        [{ "": ['"Policy"="{}"'] }, "Policy is not a T3 Code policy value"],
+        [[registryValue("Policy", "{}")], "Policy is not a T3 Code policy value"],
       ] as const) {
-        assert.include(yield* read("win32", { [EXPORT_FILE]: regExport(values) }, reg()), reason);
+        assert.include(yield* read("win32", {}, registry(values)), reason);
       }
     }),
   );
