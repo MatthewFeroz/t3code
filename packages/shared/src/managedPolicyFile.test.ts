@@ -148,7 +148,7 @@ describe("readManagedPolicy", () => {
     }),
   );
 
-  it.effect("reads the Windows Policies key, and treats a missing or empty one as none", () =>
+  it.effect("treats missing, empty or disabled Windows policies as none", () =>
     Effect.gen(function* () {
       const exported = { [EXPORT_FILE]: regExport({ "": ['"Organization"="Example Corp"'] }) };
 
@@ -168,8 +168,26 @@ describe("readManagedPolicy", () => {
         yield* read("win32", { ...exported, [managedPolicyPath("win32")]: policy }, reg()),
         "deploy the policy one way",
       );
-      // Group Policy can leave the key behind with nothing in it.
-      assert.isUndefined(yield* read("win32", { [EXPORT_FILE]: regExport({ "": [] }) }, reg()));
+      // Disabled groups leave their DWORD and unchecked boxes behind, without Organization.
+      for (const sections of [
+        { "": [] },
+        {
+          "": ['"AllowedDrivers"=dword:00000000'],
+          AllowedDrivers: ['"codex"=dword:00000000', '"claudeAgent"=dword:00000000'],
+        },
+        {
+          "": ['"Clients"=dword:00000000'],
+          Clients: ['"desktop"=dword:00000000', '"remote"=dword:00000000'],
+        },
+        { "": ['"Updates"=dword:00000000', '"AllowNightly"=dword:00000000'] },
+      ] as const) {
+        const files = { [EXPORT_FILE]: regExport(sections) };
+        assert.isUndefined(yield* read("win32", files, reg()));
+        assert.equal(
+          yield* read("win32", { ...files, [managedPolicyPath("win32")]: policy }, reg()),
+          managedPolicyPath("win32"),
+        );
+      }
     }),
   );
 
@@ -270,6 +288,14 @@ describe("readManagedPolicy", () => {
         [
           { "": ['"MaxRuntimeMode"="auto-accept-edits"'] },
           "set the Organization policy whenever another T3 Code policy is set",
+        ],
+        [
+          { "": ['"AllowedDrivers"=dword:00000000', '"Telemetry"=dword:00000000'] },
+          "set the Organization policy whenever another T3 Code policy is set",
+        ],
+        [
+          { "": ['"AllowedDrivers"=dword:00000000', '"MaxMode"="auto"'] },
+          "not a T3 Code policy value",
         ],
         [{ "": ['"Policy"="{}"'] }, "Policy is not a T3 Code policy value"],
       ] as const) {

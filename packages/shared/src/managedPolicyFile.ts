@@ -256,6 +256,8 @@ export function windowsPolicyDocument(
   for (const [key, list] of lists) {
     put(WINDOWS_POLICY_LISTS[key as keyof typeof WINDOWS_POLICY_LISTS], list);
   }
+  // Disabled groups can leave registry values without an effective policy.
+  if (Object.keys(document).length === 1) return { document: undefined };
   // The schema would name `["organization"]`, which an admin cannot map to a Group Policy setting.
   if (document.organization === undefined) {
     return { error: "set the Organization policy whenever another T3 Code policy is set" };
@@ -353,13 +355,11 @@ const readPlatformPolicy = Effect.fnUntraced(function* (platform: NodeJS.Platfor
     if (typeof exported === "number") {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
-    const values = parseRegistryExport(exported);
-    // Group Policy can leave the key behind, empty, once every control is Not Configured.
-    if (values.length === 0) return undefined;
-    const built = windowsPolicyDocument(values);
+    const built = windowsPolicyDocument(parseRegistryExport(exported));
     if ("error" in built) {
       return yield* new ManagedPolicyFileError({ path, reason: built.error });
     }
+    if (built.document === undefined) return undefined;
     return { source: path, document: yield* decodeDocument(path, built.document) };
   }
   return undefined;
