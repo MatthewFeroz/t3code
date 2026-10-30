@@ -9,8 +9,10 @@ import { ChildProcessSpawner } from "effect/process";
 import {
   MACOS_MANAGED_PREFERENCES_PATH,
   managedPolicyPath,
+  parseRegistryValues,
   readManagedPolicy,
   WINDOWS_POLICY_KEY,
+  windowsPolicyDocument,
 } from "./managedPolicyFile.ts";
 
 const policy = JSON.stringify({ schemaVersion: 1, organization: "Example Corp" });
@@ -122,17 +124,16 @@ describe("readManagedPolicy", () => {
     }),
   );
 
-  it.effect("reads the Windows Policies registry value, and treats a missing one as none", () =>
+  it.effect("reads the Windows Policies key, and treats a missing or empty one as none", () =>
     Effect.gen(function* () {
       // The Policies root answers unless the registry itself cannot be read.
       const reg = (stdout: string, exitCode = 0, rootExitCode = 0) => ({
         "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) =>
-          args.includes("/v") ? { stdout, exitCode } : { stdout: "", exitCode: rootExitCode },
+          args.includes("/s") ? { stdout, exitCode } : { stdout: "", exitCode: rootExitCode },
       });
-      const output = (type: string, value: string) =>
-        `\r\n${WINDOWS_POLICY_KEY}\r\n    Policy    ${type}    ${value}\r\n\r\n`;
+      const output = `\r\n${WINDOWS_POLICY_KEY}\r\n    Organization    REG_SZ    Example Corp\r\n\r\n`;
 
-      assert.equal(yield* read("win32", {}, reg(output("REG_SZ", policy))), WINDOWS_POLICY_KEY);
+      assert.equal(yield* read("win32", {}, reg(output)), WINDOWS_POLICY_KEY);
       assert.isUndefined(yield* read("win32", {}, reg("", 1)));
       // A query that fails exits 1 too, so it must not read as no policy.
       assert.include(yield* read("win32", {}, reg("", 1, 1)), "registry cannot be read");
@@ -140,11 +141,96 @@ describe("readManagedPolicy", () => {
         yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg("", 1)),
         managedPolicyPath("win32"),
       );
-      assert.include(yield* read("win32", {}, reg(output("REG_DWORD", "0x1"))), "as a string");
       assert.include(
-        yield* read("win32", {}, reg(output("REG_SZ", "{ not json"))),
-        "does not match the policy schema",
+        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg(output)),
+        "deploy the policy one way",
       );
+      // Group Policy can leave the key behind with nothing in it.
+      assert.isUndefined(yield* read("win32", {}, reg(`\r\n${WINDOWS_POLICY_KEY}\r\n\r\n`)));
+    }),
+  );
+
+  it.effect("builds the policy from the values the Group Policy template writes", () =>
+    Effect.gen(function* () {
+      const root = "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\T3Tools\\T3Code";
+      const keys = (sections: Readonly<Record<string, ReadonlyArray<string>>>) =>
+        Object.entries(sections)
+          .map(([key, lines]) =>
+            [key === "" ? root : `${root}\\${key}`, ...lines.map((line) => `    ${line}`)].join(
+              "\r\n",
+            ),
+          )
+          .join("\r\n\r\n");
+      const reg = (stdout: string) => ({
+        "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) =>
+          args.includes("/s") ? { stdout, exitCode: 0 } : { stdout: "", exitCode: 0 },
+      });
+      const policy = {
+        "": [
+          "Organization    REG_SZ    Example Corp",
+          "SupportUrl    REG_SZ    ",
+          "MaxRuntimeMode    REG_SZ    auto-accept-edits",
+          "Telemetry    REG_DWORD    0x0",
+          'Settings    REG_SZ    {"enableAgentBrowserAccess": {"value": false, "locked": true}}',
+          "UpdatesMode    REG_SZ    off",
+          "AllowNightly    REG_DWORD    0x1",
+        ],
+        Clients: ["desktop    REG_DWORD    0x1", "remote    REG_DWORD    0x0"],
+        AllowedDrivers: ["codex    REG_DWORD    0x1", "claudeAgent    REG_DWORD    0x1"],
+      };
+      assert.deepStrictEqual(windowsPolicyDocument(parseRegistryValues(keys(policy))), {
+        document: {
+          schemaVersion: 1,
+          organization: "Example Corp",
+          settings: { enableAgentBrowserAccess: { value: false, locked: true } },
+          limits: {
+            maxRuntimeMode: "auto-accept-edits",
+            telemetry: false,
+            updates: { mode: "off", allowNightly: true },
+            clients: ["desktop"],
+            providers: { allowedDrivers: ["codex", "claudeAgent"] },
+          },
+        },
+      });
+      assert.equal(yield* read("win32", {}, reg(keys(policy))), WINDOWS_POLICY_KEY);
+
+      // Anything the template does not write fails closed rather than being ignored.
+      for (const [sections, reason] of [
+        [
+          { "": ["Organization    REG_SZ    Example Corp", "Telemetry    REG_DWORD    0x2"] },
+          "DWORD of 0 or 1",
+        ],
+        [
+          { "": ["Organization    REG_SZ    Example Corp", "MaxMode    REG_SZ    auto"] },
+          "not a T3 Code policy value",
+        ],
+        [
+          { "": ["Organization    REG_SZ    Example Corp"], Other: ["x    REG_DWORD    0x1"] },
+          "not a T3 Code policy key",
+        ],
+        [
+          { "": ["Organization    REG_SZ    Example Corp", "Settings    REG_SZ    {"] },
+          "not valid JSON",
+        ],
+        [
+          {
+            "": ["Organization    REG_SZ    Example Corp"],
+            Clients: ["remote    REG_DWORD    0x0"],
+          },
+          "does not match the policy schema",
+        ],
+        [{ "": ["Organization    REG_DWORD    0x1"] }, "Organization must be a string"],
+        [
+          {
+            "": [
+              `Policy    REG_SZ    ${JSON.stringify({ schemaVersion: 1, organization: "Example Corp" })}`,
+            ],
+          },
+          "Policy is not a T3 Code policy value",
+        ],
+      ] as const) {
+        assert.include(yield* read("win32", {}, reg(keys(sections))), reason);
+      }
     }),
   );
 });

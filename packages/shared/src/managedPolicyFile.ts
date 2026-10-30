@@ -84,8 +84,34 @@ export const readManagedPolicyFile = Effect.fn("readManagedPolicyFile")(function
 /** Where a configuration profile's managed preferences land on macOS. */
 export const MACOS_MANAGED_PREFERENCES_PATH =
   "/Library/Managed Preferences/com.t3tools.t3code.plist";
-/** The registry key Group Policy and Intune write to on Windows; `Policy` holds the JSON. */
+/** The registry key the Group Policy template's controls write to, one value each. */
 export const WINDOWS_POLICY_KEY = "HKLM\\SOFTWARE\\Policies\\T3Tools\\T3Code";
+const WINDOWS_POLICY_KEY_SUFFIX = "\\software\\policies\\t3tools\\t3code";
+
+/** Each value a Group Policy control writes, and where it lands in the document. */
+export const WINDOWS_POLICY_VALUES = {
+  Organization: { type: "string", path: ["organization"] },
+  SupportUrl: { type: "string", path: ["supportUrl"] },
+  Settings: { type: "json", path: ["settings"] },
+  MaxRuntimeMode: { type: "string", path: ["limits", "maxRuntimeMode"] },
+  Connect: { type: "boolean", path: ["limits", "connect"] },
+  WebhookTasks: { type: "boolean", path: ["limits", "webhookTasks"] },
+  Telemetry: { type: "boolean", path: ["limits", "telemetry"] },
+  BrowserCookieImport: { type: "boolean", path: ["limits", "browserCookieImport"] },
+  ProviderInstances: { type: "json", path: ["limits", "providers", "instances"] },
+  UpdatesMode: { type: "string", path: ["limits", "updates", "mode"] },
+  UpdatesFeedUrl: { type: "string", path: ["limits", "updates", "feedUrl"] },
+  AllowNightly: { type: "boolean", path: ["limits", "updates", "allowNightly"] },
+} as const satisfies Record<
+  string,
+  { readonly type: "string" | "json" | "boolean"; readonly path: ReadonlyArray<string> }
+>;
+
+/** Subkeys of checkboxes: every value set to 1 is one entry of the list at `path`. */
+export const WINDOWS_POLICY_LISTS = {
+  Clients: ["limits", "clients"],
+  AllowedDrivers: ["limits", "providers", "allowedDrivers"],
+} as const satisfies Record<string, ReadonlyArray<string>>;
 const WINDOWS_POLICIES_ROOT = "HKLM\\SOFTWARE\\Policies";
 // Absolute paths: an earlier PATH entry could otherwise answer that there is no policy.
 const PLUTIL = "/usr/bin/plutil";
@@ -103,13 +129,91 @@ const run = Effect.fnUntraced(function* (command: string, args: ReadonlyArray<st
   return { stdout, exitCode: Number(exitCode) };
 }, Effect.scoped);
 
-/** The JSON in `reg query` output for the `Policy` value, or undefined when it has none. */
-function parseRegistryPolicy(output: string): string | undefined {
-  const match = /^\s*Policy\s+REG_SZ\s+(.*?)\s*$/m.exec(output);
-  return match?.[1];
+const decodeJsonExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
+
+interface RegistryValue {
+  /** The subkey below the policy key, or "" for the key itself. */
+  readonly key: string;
+  readonly name: string;
+  readonly type: string;
+  readonly data: string;
 }
 
-const decodeJsonExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
+/** The values in `reg query <policy key> /s` output. */
+export function parseRegistryValues(output: string): ReadonlyArray<RegistryValue> {
+  const values: Array<RegistryValue> = [];
+  let key = "";
+  for (const line of output.split(/\r?\n/).map((raw) => raw.trimEnd())) {
+    if (/^HKEY_/i.test(line)) {
+      const at = line.toLowerCase().indexOf(WINDOWS_POLICY_KEY_SUFFIX);
+      key = at === -1 ? line : line.slice(at + WINDOWS_POLICY_KEY_SUFFIX.length + 1);
+      continue;
+    }
+    const match = /^ {4}(.+?) {4}(REG_[A-Z_]+)(?: {4}(.*))?$/.exec(line);
+    if (match !== null) {
+      values.push({ key, name: match[1]!, type: match[2]!, data: match[3] ?? "" });
+    }
+  }
+  return values;
+}
+
+const setPath = (target: Record<string, unknown>, path: ReadonlyArray<string>, value: unknown) => {
+  let node = target;
+  for (const segment of path.slice(0, -1)) {
+    node = (node[segment] ??= {}) as Record<string, unknown>;
+  }
+  node[path.at(-1)!] = value;
+};
+
+const dwordBoolean = (value: RegistryValue) =>
+  value.type !== "REG_DWORD" ? undefined : ({ "0x0": false, "0x1": true } as const)[value.data];
+
+/** The document the template's separate values describe, or why they do not describe one. */
+export function windowsPolicyDocument(
+  values: ReadonlyArray<RegistryValue>,
+): { readonly document: unknown } | { readonly error: string } {
+  const document: Record<string, unknown> = { schemaVersion: 1 };
+  const lists = new Map<string, Array<string>>();
+  for (const value of values) {
+    const where = value.key === "" ? value.name : `${value.key}\\${value.name}`;
+    if (value.key !== "") {
+      if (!Object.hasOwn(WINDOWS_POLICY_LISTS, value.key)) {
+        return { error: `${value.key} is not a T3 Code policy key` };
+      }
+      const checked = dwordBoolean(value);
+      if (checked === undefined) return { error: `${where} must be a DWORD of 0 or 1` };
+      const list = lists.get(value.key) ?? [];
+      lists.set(value.key, list);
+      if (checked) list.push(value.name);
+      continue;
+    }
+    if (!Object.hasOwn(WINDOWS_POLICY_VALUES, value.name)) {
+      return { error: `${value.name} is not a T3 Code policy value` };
+    }
+    const field = WINDOWS_POLICY_VALUES[value.name as keyof typeof WINDOWS_POLICY_VALUES];
+    if (field.type === "boolean") {
+      const flag = dwordBoolean(value);
+      if (flag === undefined) return { error: `${where} must be a DWORD of 0 or 1` };
+      setPath(document, field.path, flag);
+      continue;
+    }
+    if (value.type !== "REG_SZ") return { error: `${where} must be a string` };
+    // Group Policy writes an empty string for a box left blank.
+    if (value.data === "") continue;
+    if (field.type === "string") {
+      setPath(document, field.path, value.data);
+      continue;
+    }
+    const parsed = decodeJsonExit(value.data);
+    if (Exit.isFailure(parsed)) return { error: `${where} is not valid JSON` };
+    setPath(document, field.path, parsed.value);
+  }
+  for (const [key, list] of lists) {
+    setPath(document, WINDOWS_POLICY_LISTS[key as keyof typeof WINDOWS_POLICY_LISTS], list);
+  }
+  return { document };
+}
+
 // Strict: keys beside the wrapper, or more than one entry, decode as a plain document and fail.
 const decodeForcedExit = Schema.decodeUnknownExit(
   Schema.Struct({
@@ -179,16 +283,19 @@ const readPlatformPolicy = Effect.fnUntraced(function* (platform: NodeJS.Platfor
     if ((yield* query([WINDOWS_POLICIES_ROOT])).exitCode !== 0) {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
-    const queried = yield* query([path, "/v", "Policy"]);
+    const queried = yield* query([path, "/s"]);
     if (queried.exitCode === 1) return undefined;
-    const raw = parseRegistryPolicy(queried.stdout);
-    if (queried.exitCode !== 0 || raw === undefined) {
-      return yield* new ManagedPolicyFileError({
-        path,
-        reason: "its Policy value cannot be read as a string",
-      });
+    if (queried.exitCode !== 0) {
+      return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
-    return { source: path, document: yield* decodeDocument(path, raw) };
+    const values = parseRegistryValues(queried.stdout);
+    // Group Policy can leave the key behind, empty, once every control is Not Configured.
+    if (values.length === 0) return undefined;
+    const built = windowsPolicyDocument(values);
+    if ("error" in built) {
+      return yield* new ManagedPolicyFileError({ path, reason: built.error });
+    }
+    return { source: path, document: yield* decodeDocument(path, built.document) };
   }
   return undefined;
 });

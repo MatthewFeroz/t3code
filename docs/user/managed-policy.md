@@ -8,17 +8,24 @@ server on that machine follows it, whichever app connects: desktop, the browser,
 
 Deploy the policy one way per machine:
 
-| OS      | Native                                                              | File                                              |
-| ------- | ------------------------------------------------------------------- | ------------------------------------------------- |
-| macOS   | Configuration profile for `com.t3tools.t3code`                      | `/Library/Application Support/T3Code/policy.json` |
-| Windows | `Policy` string value under `HKLM\SOFTWARE\Policies\T3Tools\T3Code` | `C:\ProgramData\T3Code\policy.json`               |
-| Linux   |                                                                     | `/etc/t3code/policy.json`                         |
+| OS      | Native                                         | File                                              |
+| ------- | ---------------------------------------------- | ------------------------------------------------- |
+| macOS   | Configuration profile for `com.t3tools.t3code` | `/Library/Application Support/T3Code/policy.json` |
+| Windows | Group Policy template                          | `C:\ProgramData\T3Code\policy.json`               |
+| Linux   |                                                | `/etc/t3code/policy.json`                         |
 
-- **macOS profile:** add a custom settings payload for `com.t3tools.t3code` whose keys are the
-  policy's top-level keys (`schemaVersion`, `organization`, `settings`, `limits`), with nested
-  dictionaries for the rest. Install it as a device profile; user profiles are ignored.
-- **Windows registry:** set `Policy` (`REG_SZ`) to the whole policy as one line of JSON, from
-  Group Policy Preferences, an Intune script, or `reg add`.
+Run `t3 policy templates <directory>` to write the Group Policy template and a configuration
+profile. Add `--policy <file>` to put that policy in the profile instead of a sample.
+
+- **macOS profile:** upload `macos/t3code.mobileconfig` to your device management tool, or build
+  a custom settings payload for `com.t3tools.t3code` whose keys are the policy's top-level keys
+  (`schemaVersion`, `organization`, `settings`, `limits`), with nested dictionaries for the rest.
+  Install it as a device profile; user profiles are ignored.
+- **Windows Group Policy:** copy `windows/t3code.admx` and `windows/en-US/t3code.adml` into your
+  `PolicyDefinitions` folder or central store, or import them into Intune. The policies appear
+  under Computer Configuration > Administrative Templates > T3 Code. Set **Organization** whenever
+  you set any other T3 Code policy. Locks and provider fields go in the two JSON policies, as the
+  same objects a policy file would hold.
 - **File:** make it writable only by administrators.
 
 T3 Code refuses to start if a machine has both a native policy and a file. It reads the policy when
@@ -154,7 +161,7 @@ machine to see the policy that applies there.
 
 T3 Code refuses to start with a policy it cannot fully apply: a policy it cannot read or parse, a
 setting it does not know, a value of the wrong type, or a key that this version does not support.
-`t3 policy check` reads a JSON file; for a profile or registry value, check the same JSON first.
+`t3 policy check` reads a JSON file; for a profile or Group Policy, check the same JSON first.
 A policy written for a newer version can carry keys an older one cannot enforce, so upgrade
 T3 Code before you deploy the policy that uses them.
 
