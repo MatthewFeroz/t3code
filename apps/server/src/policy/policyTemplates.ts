@@ -61,7 +61,7 @@ const policies = (): ReadonlyArray<Policy> => [
   {
     id: "MaxRuntimeMode",
     title: "Broadest permission mode",
-    help: "The broadest permission mode any thread may use, including threads agents and scheduled tasks start.\n\nA thread already above it cannot run another turn until someone lowers its mode. Under this limit, each provider's launch settings (binary path, launch arguments, environment variables) come only from the policy.",
+    help: "The broadest permission mode any thread may use, including threads agents and scheduled tasks start.\n\nA thread already above it cannot run another turn until someone lowers its mode. Under this limit, each provider's launch settings (binary path, launch arguments, environment variables) come only from the policy.\n\nDisabled or Not Configured: no restriction.",
     elements: [
       {
         kind: "enum",
@@ -75,7 +75,7 @@ const policies = (): ReadonlyArray<Policy> => [
   {
     id: "Clients",
     title: "Allowed clients",
-    help: "What may connect to T3 Code on this machine.\n\nWithout Remote, T3 Code only listens on this machine, does not create pairing links, signs out devices that paired earlier, and turns T3 Connect off. Check at least one client.",
+    help: "What may connect to T3 Code on this machine.\n\nWithout Remote, T3 Code only listens on this machine, does not create pairing links, signs out devices that paired earlier, and turns T3 Connect off. Check at least one client.\n\nDisabled or Not Configured: no restriction.",
     elements: [
       {
         kind: "checkbox",
@@ -127,7 +127,7 @@ const policies = (): ReadonlyArray<Policy> => [
   {
     id: "AllowedDrivers",
     title: "Allowed providers",
-    help: "Only the checked providers may run. Threads on other providers stay, marked unavailable.",
+    help: "Only the checked providers may run. Threads on other providers stay, marked unavailable.\n\nDisabled or Not Configured: no restriction.",
     elements: knownDriverLabels().map(({ driver, label }) => ({
       kind: "checkbox" as const,
       list: "AllowedDrivers" as const,
@@ -139,7 +139,7 @@ const policies = (): ReadonlyArray<Policy> => [
   {
     id: "Updates",
     title: "Updates",
-    help: "Off stops T3 Code from checking for updates, for machines that receive T3 Code through device management.\n\nA feed URL makes the desktop app update from your own mirror of the release feed instead of GitHub; it must be https. Unchecking nightly makes the nightly channel unavailable.",
+    help: "Off stops T3 Code from checking for updates, for machines that receive T3 Code through device management.\n\nA feed URL makes the desktop app update from your own mirror of the release feed instead of GitHub; it must be https. Unchecking nightly makes the nightly channel unavailable.\n\nDisabled or Not Configured: no restriction.",
     elements: [
       {
         kind: "enum",
@@ -321,11 +321,37 @@ const plistValue = (value: unknown, indent: string): string => {
     .join("\n")}\n${indent}</dict>`;
 };
 
+/** Where `value` holds a `null`, as path segments, or undefined when it holds none. */
+const nullPath = (
+  value: unknown,
+  path: ReadonlyArray<string>,
+): ReadonlyArray<string> | undefined => {
+  if (value === null) return path;
+  if (typeof value !== "object") return undefined;
+  for (const [key, item] of Object.entries(value)) {
+    const found = nullPath(item, [...path, key]);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+};
+
 /** A device configuration profile that installs `document` for `com.t3tools.t3code`. */
 export function macosProfile(
   document: ManagedPolicyDocument,
   uuids: { readonly profile: string; readonly payload: string },
-): string {
+):
+  | { readonly _tag: "Valid"; readonly profile: string }
+  | { readonly _tag: "Invalid"; readonly reason: string } {
+  // A plist has no null, and a setting may be locked empty.
+  const empty = nullPath(document, []);
+  if (empty !== undefined) {
+    const setting =
+      empty[0] === "settings" && empty.at(-1) === "value" ? empty.slice(0, -1) : empty;
+    return {
+      _tag: "Invalid",
+      reason: `${setting.join(".")} is null, which a configuration profile cannot hold; deploy this policy as a file.`,
+    };
+  }
   const profile = {
     PayloadContent: [
       {
@@ -346,10 +372,13 @@ export function macosProfile(
     PayloadUUID: uuids.profile,
     PayloadVersion: 1,
   };
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  return {
+    _tag: "Valid",
+    profile: `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 ${plistValue(profile, "")}
 </plist>
-`;
+`,
+  };
 }

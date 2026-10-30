@@ -9,7 +9,7 @@ import { ChildProcessSpawner } from "effect/process";
 import {
   MACOS_MANAGED_PREFERENCES_PATH,
   managedPolicyPath,
-  parseRegistryValues,
+  parseRegistryExport,
   readManagedPolicy,
   WINDOWS_POLICY_KEY,
   windowsPolicyDocument,
@@ -18,6 +18,29 @@ import {
 const policy = JSON.stringify({ schemaVersion: 1, organization: "Example Corp" });
 
 type Result = { readonly stdout: string; readonly exitCode: number };
+
+const TEMP = "C:\\Temp\\t3code-policy";
+const EXPORT_FILE = `${TEMP}\\policy.reg`;
+
+/** What `reg export` writes for the policy key, given each subkey's value lines. */
+const regExport = (sections: Readonly<Record<string, ReadonlyArray<string>>>) =>
+  [
+    "Windows Registry Editor Version 5.00",
+    ...Object.entries(sections).flatMap(([key, lines]) => [
+      "",
+      `[HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\T3Tools\\T3Code${key === "" ? "" : `\\${key}`}]`,
+      ...lines,
+    ]),
+    "",
+  ].join("\r\n");
+
+/** reg.exe whose export exits `exitCode`, and whose Policies root query exits `rootExitCode`. */
+const reg = (exitCode = 0, rootExitCode = 0) => ({
+  "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) => ({
+    stdout: "",
+    exitCode: args[0] === "export" ? exitCode : rootExitCode,
+  }),
+});
 
 /** Files that exist, and what a command prints and exits with, by command name and arguments. */
 const machine = (
@@ -28,6 +51,7 @@ const machine = (
     FileSystem.layerNoop({
       exists: (path) => Effect.succeed(path in files),
       readFileString: (path) => Effect.succeed(files[path] ?? ""),
+      makeTempDirectoryScoped: () => Effect.succeed(TEMP),
     }),
     Layer.succeed(
       ChildProcessSpawner.ChildProcessSpawner,
@@ -126,63 +150,46 @@ describe("readManagedPolicy", () => {
 
   it.effect("reads the Windows Policies key, and treats a missing or empty one as none", () =>
     Effect.gen(function* () {
-      // The Policies root answers unless the registry itself cannot be read.
-      const reg = (stdout: string, exitCode = 0, rootExitCode = 0) => ({
-        "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) =>
-          args.includes("/s") ? { stdout, exitCode } : { stdout: "", exitCode: rootExitCode },
-      });
-      const output = `\r\n${WINDOWS_POLICY_KEY}\r\n    Organization    REG_SZ    Example Corp\r\n\r\n`;
+      const exported = { [EXPORT_FILE]: regExport({ "": ['"Organization"="Example Corp"'] }) };
 
-      assert.equal(yield* read("win32", {}, reg(output)), WINDOWS_POLICY_KEY);
-      assert.isUndefined(yield* read("win32", {}, reg("", 1)));
-      // A query that fails exits 1 too, so it must not read as no policy.
-      assert.include(yield* read("win32", {}, reg("", 1, 1)), "registry cannot be read");
+      assert.equal(yield* read("win32", exported, reg()), WINDOWS_POLICY_KEY);
+      assert.isUndefined(yield* read("win32", {}, reg(1)));
+      // An export that fails exits 1 too, so it must not read as no policy.
+      assert.include(yield* read("win32", {}, reg(1, 1)), "registry cannot be read");
       assert.equal(
-        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg("", 1)),
+        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg(1)),
         managedPolicyPath("win32"),
       );
       assert.include(
-        yield* read("win32", { [managedPolicyPath("win32")]: policy }, reg(output)),
+        yield* read("win32", { ...exported, [managedPolicyPath("win32")]: policy }, reg()),
         "deploy the policy one way",
       );
       // Group Policy can leave the key behind with nothing in it.
-      assert.isUndefined(yield* read("win32", {}, reg(`\r\n${WINDOWS_POLICY_KEY}\r\n\r\n`)));
+      assert.isUndefined(yield* read("win32", { [EXPORT_FILE]: regExport({ "": [] }) }, reg()));
     }),
   );
 
   it.effect("builds the policy from the values the Group Policy template writes", () =>
     Effect.gen(function* () {
-      const root = "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\T3Tools\\T3Code";
-      const keys = (sections: Readonly<Record<string, ReadonlyArray<string>>>) =>
-        Object.entries(sections)
-          .map(([key, lines]) =>
-            [key === "" ? root : `${root}\\${key}`, ...lines.map((line) => `    ${line}`)].join(
-              "\r\n",
-            ),
-          )
-          .join("\r\n\r\n");
-      const reg = (stdout: string) => ({
-        "C:\\Windows\\System32\\reg.exe": (args: ReadonlyArray<string>) =>
-          args.includes("/s") ? { stdout, exitCode: 0 } : { stdout: "", exitCode: 0 },
-      });
-      const policy = {
+      // As a Windows 10 PC exports them: text outside the console code page, and escaped quotes.
+      const sections = {
         "": [
-          "Organization    REG_SZ    Example Corp",
-          "SupportUrl    REG_SZ    ",
-          "MaxRuntimeMode    REG_SZ    auto-accept-edits",
-          "Telemetry    REG_DWORD    0x0",
-          'Settings    REG_SZ    {"enableAgentBrowserAccess": {"value": false, "locked": true}}',
-          "UpdatesMode    REG_SZ    off",
-          "AllowNightly    REG_DWORD    0x1",
+          '"Organization"="Société 日本 ✓"',
+          '"SupportUrl"=""',
+          '"MaxRuntimeMode"="auto-accept-edits"',
+          '"Telemetry"=dword:00000000',
+          '"Settings"="{\\"enableAgentBrowserAccess\\": {\\"value\\": \\"a\\\\\\\\b\\", \\"locked\\": true}}"',
+          '"UpdatesMode"="off"',
+          '"AllowNightly"=dword:00000001',
         ],
-        Clients: ["desktop    REG_DWORD    0x1", "remote    REG_DWORD    0x0"],
-        AllowedDrivers: ["codex    REG_DWORD    0x1", "claudeAgent    REG_DWORD    0x1"],
+        Clients: ['"desktop"=dword:00000001', '"remote"=dword:00000000'],
+        AllowedDrivers: ['"codex"=dword:00000001', '"claudeAgent"=dword:00000001'],
       };
-      assert.deepStrictEqual(windowsPolicyDocument(parseRegistryValues(keys(policy))), {
+      assert.deepStrictEqual(windowsPolicyDocument(parseRegistryExport(regExport(sections))), {
         document: {
           schemaVersion: 1,
-          organization: "Example Corp",
-          settings: { enableAgentBrowserAccess: { value: false, locked: true } },
+          organization: "Société 日本 ✓",
+          settings: { enableAgentBrowserAccess: { value: "a\\b", locked: true } },
           limits: {
             maxRuntimeMode: "auto-accept-edits",
             telemetry: false,
@@ -192,44 +199,27 @@ describe("readManagedPolicy", () => {
           },
         },
       });
-      assert.equal(yield* read("win32", {}, reg(keys(policy))), WINDOWS_POLICY_KEY);
 
       // Anything the template does not write fails closed rather than being ignored.
-      for (const [sections, reason] of [
+      const organization = '"Organization"="Example Corp"';
+      for (const [values, reason] of [
+        [{ "": [organization, '"Telemetry"=dword:00000002'] }, "DWORD of 0 or 1"],
+        [{ "": [organization, '"MaxMode"="auto"'] }, "not a T3 Code policy value"],
+        [{ "": [organization], Other: ['"x"=dword:00000001'] }, "not a T3 Code policy key"],
+        [{ "": [organization, '"Settings"="{"'] }, "not valid JSON"],
         [
-          { "": ["Organization    REG_SZ    Example Corp", "Telemetry    REG_DWORD    0x2"] },
-          "DWORD of 0 or 1",
-        ],
-        [
-          { "": ["Organization    REG_SZ    Example Corp", "MaxMode    REG_SZ    auto"] },
-          "not a T3 Code policy value",
-        ],
-        [
-          { "": ["Organization    REG_SZ    Example Corp"], Other: ["x    REG_DWORD    0x1"] },
-          "not a T3 Code policy key",
-        ],
-        [
-          { "": ["Organization    REG_SZ    Example Corp", "Settings    REG_SZ    {"] },
-          "not valid JSON",
-        ],
-        [
-          {
-            "": ["Organization    REG_SZ    Example Corp"],
-            Clients: ["remote    REG_DWORD    0x0"],
-          },
+          { "": [organization], Clients: ['"remote"=dword:00000000'] },
           "does not match the policy schema",
         ],
-        [{ "": ["Organization    REG_DWORD    0x1"] }, "Organization must be a string"],
+        [{ "": ['"Organization"=dword:00000001'] }, "Organization must be a string"],
+        [{ "": ['"Organization"=hex(2):45,00,00,00'] }, "Organization must be a string"],
         [
-          {
-            "": [
-              `Policy    REG_SZ    ${JSON.stringify({ schemaVersion: 1, organization: "Example Corp" })}`,
-            ],
-          },
-          "Policy is not a T3 Code policy value",
+          { "": ['"MaxRuntimeMode"="auto-accept-edits"'] },
+          "set the Organization policy whenever another T3 Code policy is set",
         ],
+        [{ "": ['"Policy"="{}"'] }, "Policy is not a T3 Code policy value"],
       ] as const) {
-        assert.include(yield* read("win32", {}, reg(keys(sections))), reason);
+        assert.include(yield* read("win32", { [EXPORT_FILE]: regExport(values) }, reg()), reason);
       }
     }),
   );

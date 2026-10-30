@@ -135,24 +135,44 @@ interface RegistryValue {
   /** The subkey below the policy key, or "" for the key itself. */
   readonly key: string;
   readonly name: string;
-  readonly type: string;
+  readonly type: "REG_SZ" | "REG_DWORD" | "other";
   readonly data: string;
 }
 
-/** The values in `reg query <policy key> /s` output. */
-export function parseRegistryValues(output: string): ReadonlyArray<RegistryValue> {
+const unescapeRegString = (text: string) => text.replace(/\\(.)/g, "$1");
+
+/**
+ * The values in `reg export <policy key>` output. `reg query` writes in the console code page,
+ * which garbles or drops text outside it; the export file is UTF-16 and loses nothing.
+ */
+export function parseRegistryExport(output: string): ReadonlyArray<RegistryValue> {
   const values: Array<RegistryValue> = [];
   let key = "";
-  for (const line of output.split(/\r?\n/).map((raw) => raw.trimEnd())) {
-    if (/^HKEY_/i.test(line)) {
-      const at = line.toLowerCase().indexOf(WINDOWS_POLICY_KEY_SUFFIX);
-      key = at === -1 ? line : line.slice(at + WINDOWS_POLICY_KEY_SUFFIX.length + 1);
+  for (const line of output.split(/\r?\n/)) {
+    const header = /^\[(.*)\]$/.exec(line);
+    if (header !== null) {
+      const at = header[1]!.toLowerCase().indexOf(WINDOWS_POLICY_KEY_SUFFIX);
+      key = at === -1 ? header[1]! : header[1]!.slice(at + WINDOWS_POLICY_KEY_SUFFIX.length + 1);
       continue;
     }
-    const match = /^ {4}(.+?) {4}(REG_[A-Z_]+)(?: {4}(.*))?$/.exec(line);
-    if (match !== null) {
-      values.push({ key, name: match[1]!, type: match[2]!, data: match[3] ?? "" });
-    }
+    const match = /^(?:"((?:[^"\\]|\\.)*)"|(@))=(.*)$/.exec(line);
+    if (match === null) continue;
+    const name = match[2] === undefined ? unescapeRegString(match[1]!) : "(Default)";
+    const raw = match[3]!;
+    const text = /^"((?:[^"\\]|\\.)*)"$/.exec(raw);
+    const dword = /^dword:([0-9a-f]{8})$/i.exec(raw);
+    values.push(
+      text !== null
+        ? { key, name, type: "REG_SZ", data: unescapeRegString(text[1]!) }
+        : dword !== null
+          ? {
+              key,
+              name,
+              type: "REG_DWORD",
+              data: `0x${Number.parseInt(dword[1]!, 16).toString(16)}`,
+            }
+          : { key, name, type: "other", data: raw },
+    );
   }
   return values;
 }
@@ -210,6 +230,10 @@ export function windowsPolicyDocument(
   }
   for (const [key, list] of lists) {
     setPath(document, WINDOWS_POLICY_LISTS[key as keyof typeof WINDOWS_POLICY_LISTS], list);
+  }
+  // The schema would name `["organization"]`, which an admin cannot map to a Group Policy setting.
+  if (document.organization === undefined) {
+    return { error: "set the Organization policy whenever another T3 Code policy is set" };
   }
   return { document };
 }
@@ -283,12 +307,23 @@ const readPlatformPolicy = Effect.fnUntraced(function* (platform: NodeJS.Platfor
     if ((yield* query([WINDOWS_POLICIES_ROOT])).exitCode !== 0) {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
-    const queried = yield* query([path, "/s"]);
-    if (queried.exitCode === 1) return undefined;
-    if (queried.exitCode !== 0) {
+    const exported = yield* Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const file = `${yield* fs.makeTempDirectoryScoped({ prefix: "t3code-policy-" })}\\policy.reg`;
+      const { exitCode } = yield* run(REG, ["export", path, file, "/y", "/reg:64"]);
+      return exitCode === 0 ? yield* fs.readFileString(file, "utf-16le") : exitCode;
+    }).pipe(
+      Effect.scoped,
+      Effect.mapError(
+        (cause) =>
+          new ManagedPolicyFileError({ path, reason: "the registry cannot be read", cause }),
+      ),
+    );
+    if (exported === 1) return undefined;
+    if (typeof exported === "number") {
       return yield* new ManagedPolicyFileError({ path, reason: "the registry cannot be read" });
     }
-    const values = parseRegistryValues(queried.stdout);
+    const values = parseRegistryExport(exported);
     // Group Policy can leave the key behind, empty, once every control is Not Configured.
     if (values.length === 0) return undefined;
     const built = windowsPolicyDocument(values);
