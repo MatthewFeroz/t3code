@@ -68,9 +68,10 @@ Copy the JSON to the path for the OS. Make it writable only by administrators.
 ### macOS configuration profile
 
 Upload `macos/t3code.mobileconfig` to your device management tool, or build a custom settings
-payload for the preference domain `com.t3tools.t3code` whose keys are the policy's top-level keys.
-Install it as a device profile, since T3 Code ignores user profiles, and deploy only one profile
-for this domain. A profile cannot hold `null`, so `t3 policy templates` refuses a policy with a
+payload for the preference domain `com.t3tools.t3code`. The payload's keys are the policy's
+top-level keys (`schemaVersion`, `organization`, `supportUrl`, `settings`, `limits`); JSON objects
+become dictionaries and lists become arrays. Install it as a device profile, since T3 Code ignores
+user profiles, and deploy only one profile for this domain. A profile cannot hold `null`, so `t3 policy templates` refuses a policy with a
 `null` value; deploy that policy as a file instead.
 
 ### Windows Group Policy
